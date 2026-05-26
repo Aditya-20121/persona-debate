@@ -1,0 +1,22 @@
+# RAG pipeline — additional dependencies
+# Install with:  pip install -r data/requirements_rag.txt
+#
+# These extend the base requirements.txt — do not replace it.
+
+# ── PDF extraction ────────────────────────────────────────────────────────────
+pymupdf>=1.24.0          # fitz — fast, accurate PDF text extraction
+
+# ── Local LLM tagging (Phase 1) ───────────────────────────────────────────────
+requests>=2.31.0          # HTTP client for Ollama API (usually already installed)
+
+# ── Dense embeddings (Phase 2 + retrieval) ────────────────────────────────────
+sentence-transformers>=3.0.0   # BAAI/bge-large-en-v1.5
+torch>=2.2.0                   # GPU backend for sentence-transformers
+                               # CUDA build: pip install torch --index-url https://download.pytorch.org/whl/cu121
+
+# ── Sparse retrieval (Phase 2 + retrieval) ────────────────────────────────────
+rank-bm25>=0.2.2          # BM25Okapi index
+
+# ── Already in base requirements.txt (listed here as reminders) ───────────────
+# supabase>=2.10.0
+# python-dotenv>=1.0.0

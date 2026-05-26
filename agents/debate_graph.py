@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
 from agents.personas import PERSONAS, PersonaConfig
-from agents.retrieval import retrieve_context_for_persona
+from data.retrieval_v2 import retrieve_context_for_persona
 
 
 # ── Shared state ────────────────────────────────────────────────────────────
