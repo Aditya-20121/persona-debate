@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Debate Arena API",
-    description="Multi-agent historical persona debate powered by LangGraph + Claude",
+    description="Multi-agent historical persona debate powered by LangGraph + Gemma 3 (local)",
     version="1.0.0",
     lifespan=lifespan,
 )

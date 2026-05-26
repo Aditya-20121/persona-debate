@@ -2,7 +2,7 @@ import os
 from typing import TypedDict, Annotated
 import operator
 
-from langchain_anthropic import ChatAnthropic
+from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
@@ -30,11 +30,12 @@ class DebateState(TypedDict):
 
 # ── Build LLM ────────────────────────────────────────────────────────────────
 
-def get_llm() -> ChatAnthropic:
-    return ChatAnthropic(
-        model="claude-sonnet-4-5",
-        api_key=os.getenv("ANTHROPIC_API_KEY"),
-        max_tokens=900,
+def get_llm() -> ChatOllama:
+    return ChatOllama(
+        model=os.getenv("OLLAMA_MODEL", "gemma3:4b-it-q8_0"),
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+        num_predict=900,
+        temperature=0.7,
     )
 
 
@@ -47,7 +48,7 @@ def make_agent_node(persona: PersonaConfig):
     Each turn:
     1. Retrieves top-3 relevant knowledge chunks from Supabase for this persona
     2. Builds the full transcript context
-    3. Calls Claude with grounded historical context injected into the prompt
+    3. Calls Gemma 3 (local via Ollama) with grounded historical context injected into the prompt
     """
 
     def node(state: DebateState) -> dict:
