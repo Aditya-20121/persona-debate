@@ -1,321 +1,305 @@
-# data/ — Persona Knowledge Pipeline
+# Data Pipeline — Persona Knowledge Base
 
-This folder contains everything needed to convert the three biography PDFs into
-a production-quality RAG knowledge base that powers the Debate Arena personas.
-
----
-
-## Why this exists
-
-The original system stored hand-written `.txt` summaries for each persona and
-retrieved them with Jina embeddings.  This pipeline replaces that with:
-
-- **Full biographies** (500-page PDFs) as the knowledge source
-- **Philosophical tagging** of every chunk (themes, dilemma type, moral stance)
-  so the retriever returns *mindset*, not just facts
-- **Hybrid retrieval** (dense BGE + sparse BM25) fused with RRF for higher
-  recall than either method alone
-- **Rich context headers** injected into every prompt so Claude is primed with
-  the persona's worldview before reading the raw evidence
+This folder contains the full preprocessing, embedding, and retrieval pipeline that converts
+biography PDFs into a hybrid RAG knowledge base for each debate persona.
 
 ---
 
-## Folder contents
+## Overview
+
+The pipeline is split into two offline phases and one runtime module:
+
+| Component | Role |
+|---|---|
+| `01_parse_and_tag.py` | Extract PDF text → clean chunks → LLM philosophical tagging → JSONL |
+| `02_embed_and_store.py` | Load JSONL → BGE-large embeddings → Supabase upsert + BM25 index |
+| `retrieval_v2.py` | Runtime: hybrid dense + sparse retrieval with RRF fusion |
+| `supabase_v2_setup.sql` | One-time Supabase schema setup |
+| `requirements_rag.txt` | Python dependencies for this pipeline |
+
+---
+
+## Folder Structure
 
 ```
 data/
-├── gandhi.pdf                  source biography
-├── hitler.pdf                  source biography
-├── mandela.pdf                 source biography
+├── gandhi.pdf                   biography PDF (not committed — provide your own)
+├── hitler.pdf
+├── mandela.pdf
 │
-├── 01_parse_and_tag.py         Phase 1 — PDF → cleaned chunks → LLM tagging → JSONL
-├── 02_embed_and_store.py       Phase 2 — JSONL → BGE embeddings → Supabase + BM25
-├── retrieval_v2.py             Runtime retrieval module (used by the debate graph)
-├── supabase_v2_setup.sql       Supabase schema (run once before Phase 2)
-├── requirements_rag.txt        Additional pip dependencies for the pipeline
+├── 01_parse_and_tag.py
+├── 02_embed_and_store.py
+├── retrieval_v2.py
+├── supabase_v2_setup.sql
+├── requirements_rag.txt
 │
-└── processed/                  Auto-created by Phase 1
-    ├── gandhi_tagged.jsonl     Tagged chunks — one JSON record per line
-    ├── hitler_tagged.jsonl
-    └── mandela_tagged.jsonl
+├── processed/                   created by Phase 1
+│   ├── gandhi_tagged.jsonl
+│   ├── hitler_tagged.jsonl
+│   └── mandela_tagged.jsonl
+│
+└── bm25_index.pkl               created by Phase 2
 ```
-
-`bm25_index.pkl` is created by Phase 2 and also lives in this folder.
 
 ---
 
-## Prerequisites
-
-### 1. Install dependencies
+## Dependencies
 
 ```bash
 pip install -r data/requirements_rag.txt
 ```
 
-Key packages:
-| Package | Purpose |
-|---|---|
-| `pymupdf` | PDF text extraction |
-| `requests` | HTTP calls to the local Ollama server |
-| `sentence-transformers` | BGE-large-en-v1.5 passage/query encoding |
-| `torch` | GPU backend for sentence-transformers |
-| `rank-bm25` | BM25Okapi sparse index |
+| Package | Version | Purpose |
+|---|---|---|
+| `pymupdf` | ≥1.24.0 | PDF text extraction |
+| `sentence-transformers` | ≥3.0.0 | BGE-large-en-v1.5 encoding |
+| `torch` | ≥2.2.0 | GPU backend |
+| `rank-bm25` | ≥0.2.2 | Sparse BM25 index |
+| `requests` | ≥2.31.0 | Ollama HTTP client |
+| `supabase` | ≥2.10.0 | Vector store client |
 
-### 2. Install and start Ollama
-
-Ollama runs the small local LLM used for tagging each chunk.
-
+**GPU install for PyTorch (CUDA 12.1):**
 ```bash
-# Download Ollama from https://ollama.com and install it, then:
-ollama serve                   # keep this running in a separate terminal
-ollama pull qwen2.5:1.5b       # ~1 GB download, needed for Phase 1 tagging
+pip install torch --index-url https://download.pytorch.org/whl/cu121
 ```
-
-### 3. Set up Supabase (run once)
-
-Open your Supabase project → SQL editor → paste and run **`data/supabase_v2_setup.sql`**.
-
-This creates:
-- Table `persona_chunks` with `VECTOR(1024)` column for BGE embeddings
-- B-tree index on `persona_id` for fast filtering
-- GIN index on `topic_keywords` for array queries
-- SQL function `match_persona_chunks(query_embedding, match_count, p_persona_id)`
-  used by the Python retriever
-
-> **Important — IVFFlat index:** The setup SQL deliberately leaves the vector
-> similarity index commented out.  IVFFlat needs data to initialise its
-> cluster centroids.  After Phase 2 finishes inserting rows, run this in
-> Supabase SQL editor:
-> ```sql
-> CREATE INDEX idx_persona_chunks_embedding
->     ON persona_chunks
->     USING ivfflat (embedding vector_cosine_ops)
->     WITH (lists = 50);
-> ```
 
 ---
 
-## Running the pipeline
+## Step 0 — Supabase Schema Setup
 
-### Phase 1 — Parse & Tag  (`01_parse_and_tag.py`)
+Run `data/supabase_v2_setup.sql` once in your **Supabase SQL Editor** before running any pipeline scripts.
 
-**What it does:**
+This creates:
+- `persona_chunks` table — stores content, metadata, and `VECTOR(1024)` embeddings
+- B-tree index on `persona_id` — fast per-persona filtering
+- GIN index on `topic_keywords` — array query support
+- `match_persona_chunks(query_embedding, match_count, p_persona_id)` — cosine similarity RPC function
 
-1. Opens each PDF with PyMuPDF page by page
-2. Cleans the raw text: rejoins hyphenated line-breaks, strips page numbers,
-   collapses whitespace
-3. Filters boilerplate pages: TOC (dot-leader detection), copyright, bibliography,
-   index, pages with fewer than 30 words
-4. Applies a sliding-window chunker (~1 500 characters, 300-character overlap)
-   that snaps to the nearest sentence boundary
-5. For each chunk, calls **Qwen2.5-1.5B** locally via Ollama with a structured
-   prompt that extracts:
-   - `topic_keywords` — 3–5 core themes (e.g. "Non-violence", "Civil Disobedience")
-   - `ethical_dilemma_type` — one of 11 fixed categories
-   - `philosophical_summary` — one sentence capturing the moral stance
-6. Writes one JSON record per chunk to `data/processed/<persona>_tagged.jsonl`
-   and flushes after each line (**crash-safe**)
+> The IVFFlat vector index is intentionally **not** created here. IVFFlat requires
+> data to be present to build its cluster centroids. Create it after Phase 2 completes
+> (see Step 3 below).
 
-**Run it:**
+---
+
+## Step 1 — Parse & Tag (`01_parse_and_tag.py`)
+
+**Requires:** Ollama running locally with `qwen2.5:1.5b` pulled.
 
 ```bash
-# All three personas
+ollama serve                  # keep running in a separate terminal
+ollama pull qwen2.5:1.5b
+```
+
+### What it does
+
+1. **Extract** — PyMuPDF reads each PDF page by page
+2. **Clean** — rejoins hyphenated line-breaks, removes isolated page numbers, collapses whitespace
+3. **Filter** — skips boilerplate pages: TOC (dot-leader detection), copyright, bibliography, index, short pages (<30 words)
+4. **Chunk** — sliding-window splitter, ~1,500 characters per chunk, 300-character overlap, snaps to sentence boundaries
+5. **Tag** — each chunk is passed to `qwen2.5:1.5b` (local Ollama) which returns structured JSON:
+   - `topic_keywords` — 3–5 core themes
+   - `ethical_dilemma_type` — one of 11 fixed categories (see taxonomy below)
+   - `philosophical_summary` — one sentence capturing the moral stance
+6. **Save** — appends one JSON record per line to `data/processed/<persona>_tagged.jsonl`, flushing after every record
+
+### Run
+
+```bash
+# Process all three personas
 python data/01_parse_and_tag.py
 
-# Single persona (useful for testing or re-running one file)
+# Process a single persona (useful for resuming or re-running one file)
 python data/01_parse_and_tag.py gandhi
 python data/01_parse_and_tag.py mandela
 python data/01_parse_and_tag.py hitler
 ```
 
-**Expected output (sample):**
+### Sample output
 
 ```
 ============================================================
   Debate Arena — Phase 1: Parse & Tag
 ============================================================
 
-────────────────────────────────────────────────────────────
   Persona : gandhi  ←  gandhi.pdf
-  Extracting pages…
   Pages extracted      : 487
-  Chunking…
   Chunks produced      : 724
   Chunks to process    : 724
+
   [   1/ 724   0.1%]  chunk    0  (p.12)  …  [2.3s]  Ahimsa, Non-violence, British Rule
-  [   2/ 724   0.3%]  chunk    1  (p.12)  …  [1.9s]  Satyagraha, Truth-force, Resistance
+  [   2/ 724   0.3%]  chunk    1  (p.13)  …  [1.9s]  Satyagraha, Truth-force, Resistance
   ...
 ```
 
-**Estimated time:** ~2–4 seconds per chunk on 8 GB GPU.
-For 3 × ~700 chunks ≈ 2–3 hours total.
+**Estimated time:** ~2–4 seconds per chunk on 8 GB GPU → ~2–3 hours for all three personas.
 
-**Resume support:** If the script is interrupted, re-running it will skip
-already-tagged chunks (identified by `chunk_index`) and continue from where it
-left off. You can safely Ctrl-C and restart.
+**Resume support:** The script tracks processed `chunk_index` values in the JSONL file.
+If interrupted, re-running automatically skips completed chunks and continues from where it stopped.
+
+### Output format (one line per chunk)
+
+```json
+{
+  "persona_id": "gandhi",
+  "chunk_index": 42,
+  "page_num": 87,
+  "content": "Gandhi believed that...",
+  "source": "/path/to/gandhi.pdf",
+  "topic_keywords": ["Ahimsa", "Civil Disobedience", "Colonial Resistance"],
+  "ethical_dilemma_type": "Violence vs. Non-violence",
+  "philosophical_summary": "True strength lies in voluntary suffering that exposes injustice."
+}
+```
 
 ---
 
-### Phase 2 — Embed & Store  (`02_embed_and_store.py`)
+## Step 2 — Embed & Store (`02_embed_and_store.py`)
 
-**Prerequisites:** Phase 1 must be 100% complete for all three personas.
+**Requires:** Phase 1 complete for all three personas. `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` set in `.env`.
 
-**What it does:**
+### What it does
 
-1. Loads all `data/processed/*_tagged.jsonl` files into memory
-2. Downloads (first run only, ~1.3 GB) and loads **BAAI/bge-large-en-v1.5**
-   via `sentence-transformers`
-3. Encodes every passage text in GPU batches of 32 → 1024-dimensional
-   normalised float32 vectors
-4. Connects to Supabase, deletes any existing rows for each persona (idempotent
-   re-runs are safe), then batch-inserts all rows with their embeddings
-5. Tokenises every chunk for BM25 and builds a **BM25Okapi** index over the
-   full corpus, pre-computing a `persona_id → chunk positions` lookup map
-6. Serialises the BM25 index + chunk metadata to `data/bm25_index.pkl`
+1. **Load** — reads all `data/processed/*_tagged.jsonl` files into memory
+2. **Model** — downloads (first run only, ~1.3 GB) and loads `BAAI/bge-large-en-v1.5` via `sentence-transformers`
+3. **Embed** — encodes all passage texts in GPU batches of 32 → 1024-dimensional normalised float32 vectors
+4. **Store (dense)** — clears existing rows per persona in Supabase, then batch-inserts all chunks with their embeddings
+5. **Store (sparse)** — builds a `BM25Okapi` index over all chunks, pre-computes a `persona_id → positions` lookup map, serialises to `data/bm25_index.pkl`
 
-**Run it:**
+### Run
 
 ```bash
 python data/02_embed_and_store.py
 ```
 
-**Expected output:**
+### Sample output
 
 ```
-============================================================
-  Debate Arena — Phase 2: Embed & Store
-============================================================
-
 [1/4]  Loading tagged JSONL files from data/processed/…
-  gandhi_tagged.jsonl                    724 chunks
-  hitler_tagged.jsonl                    698 chunks
-  mandela_tagged.jsonl                   711 chunks
-       Total chunks: 2133
+  gandhi_tagged.jsonl      724 chunks
+  hitler_tagged.jsonl      698 chunks
+  mandela_tagged.jsonl     711 chunks
+  Total chunks: 2133
 
 [2/4]  Loading embedding model 'BAAI/bge-large-en-v1.5'…
-       (first run downloads ~1.3 GB — subsequent runs use cache)
-       Embedding dim: 1024
+  Embedding dim: 1024
 
 [3/4]  Embedding 2133 passage chunks…
-       Batches: 100%|████████████████| 67/67 [08:42<00:00,  7.8s/it]
-       Done.  Shape: (2133, 1024)
+  100%|████████████████| 67/67 [08:42<00:00]
 
 [4/4]  Storing in Supabase + building BM25 index…
   Cleared existing rows for persona_id='gandhi'
   Cleared existing rows for persona_id='hitler'
   Cleared existing rows for persona_id='mandela'
   Inserting 2133 rows in batches of 50…
-  Rows     1 –    50  inserted
-  ...
-  BM25 index saved → data\bm25_index.pkl  (12.3 MB)
+  BM25 index saved → data/bm25_index.pkl  (12.3 MB)
 ```
 
-**Estimated time:** ~10–20 minutes (embedding is the slow step).
+**Estimated time:** ~10–20 minutes (embedding dominates).
 
-After this step completes, run the IVFFlat index SQL shown in the Supabase
-section above.
+### Step 2b — Create the IVFFlat index (after data is loaded)
+
+Run this in your **Supabase SQL Editor** immediately after Phase 2 completes:
+
+```sql
+CREATE INDEX idx_persona_chunks_embedding
+    ON persona_chunks
+    USING ivfflat (embedding vector_cosine_ops)
+    WITH (lists = 50);
+```
+
+> If you already ran Phase 2 before creating the index, run `REINDEX TABLE persona_chunks;` instead.
 
 ---
 
-## How retrieval works at debate time  (`retrieval_v2.py`)
+## Runtime Retrieval (`retrieval_v2.py`)
 
-This module is the runtime component.  It is imported by
-`agents/debate_graph.py` instead of the old `agents/retrieval.py`.
+This module is imported directly by `agents/debate_graph.py` and called once per agent turn.
 
-For every persona turn in the debate graph, `retrieve_context_for_persona()` is
-called with the persona's ID and the debate question.
+### Function signature
 
-**Internal steps:**
+```python
+retrieve_context_for_persona(
+    persona_id: str,   # "gandhi" | "mandela" | "hitler"
+    query:      str,   # the debate question
+    k:          int,   # number of final passages to return (default: 5)
+) -> str              # formatted context block, or "" if retrieval fails
+```
+
+### Retrieval pipeline
 
 ```
 debate question
       │
-      ▼
-BGE-large-en-v1.5                      BM25Okapi
-encode with query prefix               tokenise & score
-      │                                      │
-      ▼                                      ▼
-Supabase cosine search             persona-filtered BM25 ranking
-(filtered by persona_id)           (from bm25_index.pkl)
-top 15 dense results               top 15 sparse results
-      │                                      │
-      └──────────────┬───────────────────────┘
-                     ▼
-          Reciprocal Rank Fusion (RRF, k=60)
-          deduplication on first 120 chars
-                     │
-                     ▼
-              top 5 fused results
-                     │
-                     ▼
-          Format with metadata headers:
-          [Theme: Non-violence, Civil Disobedience]  [Dilemma type: Violence vs. Non-violence]
-          [Stance: Soul-force ultimately prevails over brute force.]
+      ├── embed with BGE-large (query prefix) ──► Supabase cosine search
+      │                                            filtered by persona_id
+      │                                            → top 15 dense results
+      │
+      └── tokenise + BM25.get_scores() ─────────► persona-filtered ranking
+                                                   from bm25_index.pkl
+                                                   → top 15 sparse results
+                                          │
+                                          ▼
+                            Reciprocal Rank Fusion  (RRF, k=60)
+                            deduplication on first 120 chars of content
+                                          │
+                                          ▼
+                                  top 5 fused results
+                                          │
+                                          ▼
+                          formatted with metadata headers:
 
-          <raw passage text>
-          ---
-          ...
-                     │
-                     ▼
-          Injected into Claude system prompt
+                          [Theme: Ahimsa, Civil Disobedience]
+                          [Dilemma type: Violence vs. Non-violence]
+                          [Stance: Soul-force ultimately prevails over brute force.]
+
+                          <raw passage text>
+
+                          ---
+                          (next passage)
+                                          │
+                                          ▼
+                          injected into Gemma 3 system prompt
 ```
 
-**Why this is better than the original:**
-- The LLM receives the *philosophical framing* of each passage, not just raw
-  text — it is primed with the persona's moral logic before reading the evidence
-- RRF catches relevant chunks that dense search misses (exact terminology) and
-  that BM25 misses (semantic similarity without shared keywords)
-- All models are cached after the first call so there's no per-request load cost
+### Design decisions
+
+| Decision | Reason |
+|---|---|
+| BGE asymmetric encoding | Queries use `"Represent this sentence for searching relevant passages: "` prefix; passages are encoded without prefix — matches BGE-large-en-v1.5 training setup |
+| Over-fetch before fusion | Both retrievers fetch `k × 3 = 15` candidates so RRF has enough diversity to rerank meaningfully |
+| Metadata headers in context | LLM sees the philosophical framing (theme, dilemma type, stance) before the raw text — primes the model with the persona's logic, not just facts |
+| Non-fatal fallback | Any retrieval failure returns `""` — the debate continues without context rather than crashing |
+| `lru_cache(maxsize=1)` on all singletons | BGE model, BM25 index, and Supabase client are loaded once per server process and reused across all requests |
 
 ---
 
-## Tagging taxonomy
+## Tagging Taxonomy
 
-The `ethical_dilemma_type` field uses a fixed 11-value vocabulary:
+The `ethical_dilemma_type` field uses a fixed 11-value vocabulary applied by the tagging LLM:
 
-| Value | When used |
+| Value | Applied when the chunk deals with... |
 |---|---|
 | `Conflict Resolution` | Navigating disputes between groups or individuals |
 | `Duty vs. Desire` | Personal obligation conflicting with self-interest |
-| `Personal Integrity` | Upholding one's principles under pressure |
-| `Justice vs. Mercy` | Punishment vs. forgiveness |
-| `Individual vs. Collective` | Personal rights vs. group welfare |
+| `Personal Integrity` | Upholding principles under pressure or threat |
+| `Justice vs. Mercy` | Punishment versus forgiveness |
+| `Individual vs. Collective` | Personal rights versus group welfare |
 | `Violence vs. Non-violence` | Moral legitimacy of force |
 | `Means vs. Ends` | Whether methods are justified by outcomes |
 | `Power and Leadership` | Responsibility and corruption of authority |
 | `Identity and Belonging` | Nation, race, religion, community |
-| `Historical Context` | Factual/narrative content without a clear dilemma |
-| `None` | No ethical dilemma identified |
+| `Historical Context` | Factual or narrative content with no clear ethical dilemma |
+| `None` | Chunk contains no identifiable ethical stance |
 
 ---
 
-## Integration with the debate system
+## Re-running the Pipeline
 
-The only change to the existing codebase was a one-line import update in
-`agents/debate_graph.py`:
+Both scripts are idempotent and safe to re-run:
 
-```python
-# Before
-from agents.retrieval import retrieve_context_for_persona
-
-# After
-from data.retrieval_v2 import retrieve_context_for_persona
-```
-
-The function signature is identical — no other changes were needed.
-The old `agents/retrieval.py` and `persona_knowledge/*.txt` files are no longer
-used and can be safely removed once the new pipeline is verified.
-
----
-
-## Re-running the pipeline
-
-Both scripts are designed for safe re-execution:
-
-- **Phase 1** checks `chunk_index` values already in the JSONL file and skips
-  them. Run it again any time without duplicating records.
-- **Phase 2** deletes and re-inserts all rows for each persona before upserting.
-  Run it again after updating the JSONL files.
-
-To process a single persona from scratch, delete its JSONL file and re-run
-Phase 1 for that persona, then re-run Phase 2 (which re-processes all three).
+| Scenario | Action |
+|---|---|
+| Phase 1 interrupted mid-way | Re-run `01_parse_and_tag.py` — already-tagged chunks are skipped |
+| Re-tag a single persona | Delete `data/processed/<persona>_tagged.jsonl`, re-run `01_parse_and_tag.py <persona>` |
+| Re-embed after editing tags | Re-run `02_embed_and_store.py` — deletes and re-inserts all rows before uploading |
+| Full reset | Delete all JSONL files in `processed/` and `bm25_index.pkl`, re-run both scripts |
