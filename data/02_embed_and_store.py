@@ -41,6 +41,46 @@ UPSERT_BATCH_SIZE  = 50    # rows per Supabase insert call
 # BGE asymmetric retrieval: queries get a prefix, passages do not.
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
+# Chunks tagged "None" carry no identifiable stance and never help a debate.
+# "Historical Context" chunks are KEPT: they hold the concrete events personas
+# cite as evidence, and summary-first embedding already ranks them below
+# stance-bearing chunks for abstract questions.
+EXCLUDE_DILEMMA_TYPES = {"None"}
+
+
+def build_retrieval_key(chunk: dict) -> str:
+    """
+    The text that gets embedded (and BM25-tokenised) for retrieval.
+
+    Debate questions are abstract ("Is violence ever justified?") while
+    biography chunks are narrative ("In 1932, Gandhi fasted in Yerwada
+    jail..."). The philosophical_summary lives in the same semantic space
+    as the questions, so leading with it bridges that gap. The raw content
+    stays in the key so concrete names/events remain searchable, and stays
+    in the payload so the LLM still receives the full passage.
+    """
+    summary = chunk.get("philosophical_summary", "").strip()
+    keywords = ", ".join(chunk.get("topic_keywords", []))
+    parts = []
+    if summary:
+        parts.append(summary)
+    if keywords:
+        parts.append(f"Themes: {keywords}")
+    parts.append(chunk["content"])
+    return "\n".join(parts)
+
+
+def filter_debate_relevant(chunks: list[dict]) -> list[dict]:
+    kept = [
+        c for c in chunks
+        if c.get("ethical_dilemma_type", "None") not in EXCLUDE_DILEMMA_TYPES
+        and c.get("philosophical_summary", "").strip()
+    ]
+    dropped = len(chunks) - len(kept)
+    print(f"       Filtered out {dropped} dead-weight chunks "
+          f"(dilemma type {sorted(EXCLUDE_DILEMMA_TYPES)} or empty summary)")
+    return kept
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Data loading
@@ -131,7 +171,9 @@ def build_and_save_bm25(chunks: list[dict]) -> None:
     from rank_bm25 import BM25Okapi
 
     print(f"  Tokenising {len(chunks)} documents…")
-    tokenised = [c["content"].lower().split() for c in chunks]
+    # Tokenise the same enriched key used for dense retrieval so BM25 can
+    # match on summary/keyword terms as well as raw passage text.
+    tokenised = [build_retrieval_key(c).lower().split() for c in chunks]
     bm25 = BM25Okapi(tokenised)
 
     # Store the index together with the lightweight chunk metadata needed at
@@ -185,6 +227,8 @@ if __name__ == "__main__":
     print("\n[1/4]  Loading tagged JSONL files from data/processed/…")
     chunks = load_all_chunks()
     print(f"       Total chunks: {len(chunks)}")
+    chunks = filter_debate_relevant(chunks)
+    print(f"       Chunks kept for index: {len(chunks)}")
 
     # ── Step 2: Load BGE model ────────────────────────────────────────────────
     print(f"\n[2/4]  Loading embedding model '{EMBEDDING_MODEL_ID}'…")
@@ -198,7 +242,8 @@ if __name__ == "__main__":
 
     # ── Step 3: Embed ─────────────────────────────────────────────────────────
     print(f"\n[3/4]  Embedding {len(chunks)} passage chunks…")
-    texts = [c["content"] for c in chunks]
+    print("       (retrieval key = philosophical_summary + themes + content)")
+    texts = [build_retrieval_key(c) for c in chunks]
     embeddings = embed_passages(texts, model)
     print(f"       Done.  Shape: {embeddings.shape}")
 

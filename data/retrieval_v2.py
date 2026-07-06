@@ -210,7 +210,7 @@ def retrieve_context_for_persona(
 
     Parameters
     ----------
-    persona_id : str   one of "gandhi", "mandela", "hitler"
+    persona_id : str   one of "gandhi", "mandela", "marx"
     query      : str   the debate question / topic
     k          : int   final number of passages to return after fusion
 

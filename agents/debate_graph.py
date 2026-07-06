@@ -47,19 +47,32 @@ def make_agent_node(persona: PersonaConfig):
     Returns a LangGraph node function for the given persona.
 
     Each turn:
-    1. Retrieves top-3 relevant knowledge chunks from Supabase for this persona
+    1. Retrieves relevant knowledge chunks for this persona (turn-aware:
+       rebuttal/closing turns retrieve against the opponent's last argument
+       as well as the question, so counter-evidence surfaces)
     2. Builds the full transcript context
-    3. Calls Gemma 3 (local via Ollama) with grounded historical context injected into the prompt
+    3. Calls Llama 3.1 8B (Segmind API) with grounded historical context injected into the prompt
     """
 
     def node(state: DebateState) -> dict:
         llm = get_llm()
         phase = state.get("phase", "opening")
 
-        # Retrieve grounded knowledge from Supabase (non-fatal if unavailable)
+        # Turn-aware retrieval query: on rebuttal/closing turns, what the
+        # persona needs evidence AGAINST is the opponent's last claim, not
+        # just the original question.
+        retrieval_query = state["question"]
+        if state["history"]:
+            last = state["history"][-1]
+            retrieval_query = (
+                f"{state['question']}\n"
+                f"Countering {last['name']}'s argument: {last['text'][:500]}"
+            )
+
+        # Retrieve grounded knowledge (non-fatal if unavailable)
         retrieved_context = retrieve_context_for_persona(
             persona_id=persona["id"],
-            query=state["question"],
+            query=retrieval_query,
             k=3,
         )
 
@@ -159,7 +172,7 @@ def build_debate_graph(persona_ids: list[str] | None = None):
     persona_ids: ordered list of persona IDs to include (default: all 3).
     """
     if persona_ids is None:
-        persona_ids = ["mandela", "gandhi", "hitler"]
+        persona_ids = ["mandela", "gandhi", "marx"]
 
     personas = [PERSONAS[pid] for pid in persona_ids]
     graph = StateGraph(DebateState)

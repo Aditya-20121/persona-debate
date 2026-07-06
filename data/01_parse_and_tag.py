@@ -1,21 +1,22 @@
 """
 Phase 1 — Parse & Tag
 =====================
-Converts each persona PDF into tagged JSONL chunks ready for embedding.
+Converts each persona source document into tagged JSONL chunks ready for embedding.
 
-Pipeline per PDF:
-  1. Extract text page-by-page with PyMuPDF
-  2. Filter boilerplate pages (TOC, copyright, index, preface)
+Pipeline per document:
+  1. Extract text (PyMuPDF for .pdf, python-docx for .docx)
+  2. Keep only the configured page range, then filter residual boilerplate
   3. Sliding-window chunker with sentence-boundary snap (~1 500 chars / chunk)
   4. Tag each chunk via Segmind API (Llama 3.1 8B) → JSON metadata
+     (runs PARALLEL_WORKERS requests concurrently)
   5. Append to data/processed/<persona>_tagged.jsonl (resume-safe)
 
 Prereqs:
-  pip install pymupdf openai python-dotenv
+  pip install pymupdf python-docx openai python-dotenv
   SEGMIND_API_KEY set in .env
 
 Run:
-  python data/01_parse_and_tag.py           # all three personas
+  python data/01_parse_and_tag.py           # all personas
   python data/01_parse_and_tag.py gandhi    # single persona
 """
 
@@ -25,7 +26,9 @@ import json
 import os
 import re
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -39,14 +42,28 @@ DATA_DIR = Path(__file__).parent
 PROCESSED_DIR = DATA_DIR / "processed"
 PROCESSED_DIR.mkdir(exist_ok=True)
 
+# Each source filename maps to its persona_id in the debate system.
+# Supported formats: .pdf, .docx
 PERSONAS: dict[str, str] = {
     "gandhi.pdf": "gandhi",
-    "hitler.pdf": "hitler",
     "mandela.pdf": "mandela",
+    "karl-marx.docx": "marx",
+}
+
+# Main-text page range per PDF (1-based, inclusive). Pages outside the range
+# are skipped entirely — this is more reliable than heuristics for skipping
+# front matter (contents, copyright) and back matter (index, bibliography).
+# Open each PDF once, note where the actual text starts/ends, and set it here.
+# None = no manual range; fall back to heuristic boilerplate detection only.
+# (.docx files have no pages — ranges do not apply to them.)
+PAGE_RANGES: dict[str, tuple[int, int] | None] = {
+    "gandhi.pdf": None,   # TODO: set after eyeballing, e.g. (9, 380)
+    "mandela.pdf": None,  # TODO: set after eyeballing
 }
 
 # ── Segmind / LLM config ──────────────────────────────────────────────────────
 _SEGMIND_MODEL = os.getenv("SEGMIND_MODEL", "llama-v3p1-8b-instruct")
+PARALLEL_WORKERS = 6  # concurrent tagging requests to the Segmind API
 _client: OpenAI | None = None
 
 
@@ -115,16 +132,58 @@ Example:
 # Text extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
-def extract_pages(pdf_path: Path) -> list[dict]:
+def extract_pages(doc_path: Path) -> list[dict]:
+    """
+    Return list of {page_num, text} dicts for the document.
+    PDFs: one dict per page, respecting PAGE_RANGES if configured.
+    DOCX: paragraphs grouped into synthetic "pages" of ~3000 chars
+          (page_num is the ordinal of the group, since .docx has no pages).
+    """
+    if doc_path.suffix.lower() == ".docx":
+        return _extract_docx(doc_path)
+    return _extract_pdf(doc_path)
+
+
+def _extract_pdf(pdf_path: Path) -> list[dict]:
+    page_range = PAGE_RANGES.get(pdf_path.name)
     doc = fitz.open(str(pdf_path))
     pages = []
     for idx, page in enumerate(doc, start=1):
+        if page_range and not (page_range[0] <= idx <= page_range[1]):
+            continue
         raw = page.get_text("text")
         cleaned = _clean_raw_text(raw)
         if cleaned:
             pages.append({"page_num": idx, "text": cleaned})
     doc.close()
     return pages
+
+
+def _extract_docx(docx_path: Path) -> list[dict]:
+    from docx import Document
+
+    doc = Document(str(docx_path))
+    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+
+    # Group paragraphs into synthetic pages so downstream chunking/boilerplate
+    # filtering works the same as for PDFs.
+    pages: list[dict] = []
+    buffer: list[str] = []
+    buf_len = 0
+    group_num = 1
+
+    for para in paragraphs:
+        buffer.append(para)
+        buf_len += len(para)
+        if buf_len >= 3_000:
+            pages.append({"page_num": group_num, "text": _clean_raw_text("\n".join(buffer))})
+            buffer, buf_len = [], 0
+            group_num += 1
+
+    if buffer:
+        pages.append({"page_num": group_num, "text": _clean_raw_text("\n".join(buffer))})
+
+    return [p for p in pages if p["text"]]
 
 
 def _clean_raw_text(text: str) -> str:
@@ -241,7 +300,6 @@ def _segmind_tag(text: str, retries: int = 2) -> dict:
             )
             raw = response.choices[0].message.content or ""
 
-            # Strip markdown fences if model wraps output anyway
             raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
             raw = re.sub(r"\s*```$", "", raw)
 
@@ -283,10 +341,10 @@ def _segmind_tag(text: str, retries: int = 2) -> dict:
 # Per-persona processing
 # ─────────────────────────────────────────────────────────────────────────────
 
-def process_persona(pdf_name: str, persona_id: str) -> None:
-    pdf_path = DATA_DIR / pdf_name
-    if not pdf_path.exists():
-        print(f"  [SKIP] {pdf_path} not found.")
+def process_persona(doc_name: str, persona_id: str) -> None:
+    doc_path = DATA_DIR / doc_name
+    if not doc_path.exists():
+        print(f"  [SKIP] {doc_path} not found.")
         return
 
     out_path = PROCESSED_DIR / f"{persona_id}_tagged.jsonl"
@@ -301,10 +359,10 @@ def process_persona(pdf_name: str, persona_id: str) -> None:
                     pass
 
     print(f"\n{'─'*60}")
-    print(f"  Persona : {persona_id}  ←  {pdf_name}")
+    print(f"  Persona : {persona_id}  ←  {doc_name}")
 
     print("  Extracting pages…")
-    pages = extract_pages(pdf_path)
+    pages = extract_pages(doc_path)
     print(f"  Pages extracted      : {len(pages)}")
 
     print("  Chunking…")
@@ -314,34 +372,44 @@ def process_persona(pdf_name: str, persona_id: str) -> None:
         print(f"  Already tagged       : {len(done)}  (resuming from last checkpoint)")
 
     remaining = [c for c in chunks if c["chunk_index"] not in done]
-    print(f"  Chunks to process    : {len(remaining)}")
+    print(f"  Chunks to process    : {len(remaining)}  ({PARALLEL_WORKERS} parallel workers)")
 
-    with open(out_path, "a", encoding="utf-8") as fh:
-        for i, chunk in enumerate(remaining):
-            pct = (i + 1) / len(remaining) * 100
-            print(
-                f"  [{i+1:>4}/{len(remaining)}  {pct:5.1f}%]  "
-                f"chunk {chunk['chunk_index']:>4}  (p.{chunk['page_num']})  …",
-                end="",
-                flush=True,
-            )
-            t0 = time.time()
-            meta = _segmind_tag(chunk["text"])
-            elapsed = time.time() - t0
+    if not remaining:
+        print("  Nothing to do.")
+        return
 
-            record = {
-                "persona_id": persona_id,
-                "chunk_index": chunk["chunk_index"],
-                "page_num": chunk["page_num"],
-                "content": chunk["text"],
-                "source": str(pdf_path),
-                **meta,
-            }
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
-            fh.flush()
+    write_lock = threading.Lock()
+    completed = 0
+    t_start = time.time()
 
+    def tag_and_save(chunk: dict) -> None:
+        nonlocal completed
+        meta = _segmind_tag(chunk["text"])
+        record = {
+            "persona_id": persona_id,
+            "chunk_index": chunk["chunk_index"],
+            "page_num": chunk["page_num"],
+            "content": chunk["text"],
+            "source": str(doc_path),
+            **meta,
+        }
+        with write_lock:
+            with open(out_path, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            completed += 1
+            pct = completed / len(remaining) * 100
+            rate = completed / max(time.time() - t_start, 1e-6)
+            eta_min = (len(remaining) - completed) / max(rate, 1e-6) / 60
             kw_preview = ", ".join(meta["topic_keywords"][:3]) or "—"
-            print(f"  [{elapsed:.1f}s]  {kw_preview}")
+            print(
+                f"  [{completed:>4}/{len(remaining)}  {pct:5.1f}%  "
+                f"ETA {eta_min:4.1f}m]  chunk {chunk['chunk_index']:>4}  {kw_preview}"
+            )
+
+    with ThreadPoolExecutor(max_workers=PARALLEL_WORKERS) as pool:
+        futures = [pool.submit(tag_and_save, c) for c in remaining]
+        for fut in as_completed(futures):
+            fut.result()  # surface any unexpected exception
 
     print(f"\n  Saved → {out_path}")
     print(f"  Total records in file: {len(done) + len(remaining)}")
@@ -356,15 +424,15 @@ if __name__ == "__main__":
     print("  Debate Arena — Phase 1: Parse & Tag")
     print("=" * 60)
 
-    # Fail fast if the API key is missing before processing any PDFs
+    # Fail fast if the API key is missing before processing any documents
     _get_client()
 
     target = sys.argv[1] if len(sys.argv) > 1 else None
 
-    for pdf_name, persona_id in PERSONAS.items():
+    for doc_name, persona_id in PERSONAS.items():
         if target and persona_id != target:
             continue
-        process_persona(pdf_name, persona_id)
+        process_persona(doc_name, persona_id)
 
     print("\n" + "=" * 60)
     print("  Phase 1 complete — tagged JSONL files are in data/processed/")

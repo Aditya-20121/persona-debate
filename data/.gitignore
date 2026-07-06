@@ -1,5 +1,6 @@
-# Do not commit source PDFs (copyrighted, large — provide your own)
+﻿# Do not commit source PDFs (copyrighted, large â€” provide your own)
 *.pdf
+*.docx
 
 # Do not commit generated pipeline outputs
 processed/

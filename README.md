@@ -109,11 +109,11 @@ This creates:
 
 ### Step 4 — Build the RAG knowledge base (one-time)
 
-Place the three biography PDFs in `data/`:
+Place the three biography source files in `data/` (PDF and DOCX are both supported):
 ```
 data/gandhi.pdf
-data/hitler.pdf
 data/mandela.pdf
+data/karl-marx.docx
 ```
 
 Run the two-phase pipeline (requires `SEGMIND_API_KEY` in `.env`):
@@ -155,7 +155,7 @@ python main.py
 Each persona (`agents/personas.py`) is configured with:
 
 1. **Identity + worldview** — who they are and the philosophical foundation they argue from
-2. **Rhetorical style** — specific patterns (Gandhi's Socratic questions, Mandela's testimony, Hitler's zero-sum framing)
+2. **Rhetorical style** — specific patterns (Gandhi's Socratic questions, Mandela's testimony, Marx's materialist critique)
 3. **Debate stance** — how they position against each other specifically
 4. **Two few-shot examples** — concrete 4-6 sentence responses calibrated to the exact voice, giving the LLM a sound to match rather than a description to interpret
 5. **Hard rules** — sentence count, required rhetorical moves, no bullet points, no meta-commentary
@@ -163,7 +163,7 @@ Each persona (`agents/personas.py`) is configured with:
 ### LangGraph State Machine
 
 ```
-[START] → mandela_node → gandhi_node → hitler_node
+[START] → mandela_node → gandhi_node → marx_node
                ↑                            ↓
                └──── increment_round ←──── (if rounds remain)
                                             ↓
@@ -213,7 +213,7 @@ evidence — separating persona simulation from plain fact retrieval.
 ```
 data: {"type":"message","persona_id":"mandela","name":"Nelson Mandela","text":"...","round":0}
 data: {"type":"message","persona_id":"gandhi","name":"Mahatma Gandhi","text":"...","round":0}
-data: {"type":"message","persona_id":"hitler","name":"Adolf Hitler","text":"...","round":0}
+data: {"type":"message","persona_id":"marx","name":"Karl Marx","text":"...","round":0}
 ...
 data: {"type":"done"}
 ```
@@ -233,7 +233,7 @@ data: {"type":"done"}
 ```json
 {
   "question": "Is violence ever justified in the pursuit of justice?",
-  "persona_ids": ["mandela", "gandhi", "hitler"],
+  "persona_ids": ["mandela", "gandhi", "marx"],
   "max_rounds": 2
 }
 ```
@@ -241,7 +241,7 @@ data: {"type":"done"}
 | Field | Type | Default | Constraints |
 |---|---|---|---|
 | `question` | string | required | 5–500 characters |
-| `persona_ids` | list | `["mandela","gandhi","hitler"]` | valid persona IDs |
+| `persona_ids` | list | `["mandela","gandhi","marx"]` | valid persona IDs |
 | `max_rounds` | int | `2` | 1–5 |
 
 ---

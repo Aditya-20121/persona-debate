@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 class DebateStartRequest(BaseModel):
     question: str = Field(..., min_length=5, max_length=500)
     persona_ids: list[str] = Field(
-        default=["mandela", "gandhi", "hitler"],
+        default=["mandela", "gandhi", "marx"],
         description="Ordered list of persona IDs to include in the debate",
     )
     max_rounds: int = Field(default=2, ge=1, le=5)

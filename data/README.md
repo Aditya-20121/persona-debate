@@ -23,9 +23,9 @@ The pipeline is split into two offline phases and one runtime module:
 
 ```
 data/
-├── gandhi.pdf                   biography PDF (not committed — provide your own)
-├── hitler.pdf
+├── gandhi.pdf                   biography source (not committed — provide your own)
 ├── mandela.pdf
+├── karl-marx.docx               .docx sources are supported alongside .pdf
 │
 ├── 01_parse_and_tag.py
 ├── 02_embed_and_store.py
@@ -35,8 +35,8 @@ data/
 │
 ├── processed/                   created by Phase 1
 │   ├── gandhi_tagged.jsonl
-│   ├── hitler_tagged.jsonl
-│   └── mandela_tagged.jsonl
+│   ├── mandela_tagged.jsonl
+│   └── marx_tagged.jsonl
 │
 └── bm25_index.pkl               created by Phase 2
 ```
@@ -106,7 +106,7 @@ python data/01_parse_and_tag.py
 # Process a single persona (useful for resuming or re-running one file)
 python data/01_parse_and_tag.py gandhi
 python data/01_parse_and_tag.py mandela
-python data/01_parse_and_tag.py hitler
+python data/01_parse_and_tag.py marx
 ```
 
 ### Sample output
@@ -171,8 +171,8 @@ python data/02_embed_and_store.py
 ```
 [1/4]  Loading tagged JSONL files from data/processed/…
   gandhi_tagged.jsonl      724 chunks
-  hitler_tagged.jsonl      698 chunks
   mandela_tagged.jsonl     711 chunks
+  marx_tagged.jsonl        698 chunks
   Total chunks: 2133
 
 [2/4]  Loading embedding model 'BAAI/bge-large-en-v1.5'…
@@ -183,8 +183,8 @@ python data/02_embed_and_store.py
 
 [4/4]  Storing in Supabase + building BM25 index…
   Cleared existing rows for persona_id='gandhi'
-  Cleared existing rows for persona_id='hitler'
   Cleared existing rows for persona_id='mandela'
+  Cleared existing rows for persona_id='marx'
   Inserting 2133 rows in batches of 50…
   BM25 index saved → data/bm25_index.pkl  (12.3 MB)
 ```
@@ -214,7 +214,7 @@ This module is imported directly by `agents/debate_graph.py` and called once per
 
 ```python
 retrieve_context_for_persona(
-    persona_id: str,   # "gandhi" | "mandela" | "hitler"
+    persona_id: str,   # "gandhi" | "mandela" | "marx"
     query:      str,   # the debate question
     k:          int,   # number of final passages to return (default: 5)
 ) -> str              # formatted context block, or "" if retrieval fails

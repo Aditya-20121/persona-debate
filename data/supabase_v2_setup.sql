@@ -18,7 +18,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS persona_chunks (
     id                     BIGSERIAL   PRIMARY KEY,
-    persona_id             TEXT        NOT NULL,           -- "gandhi" | "mandela" | "hitler"
+    persona_id             TEXT        NOT NULL,           -- "gandhi" | "mandela" | "marx"
     content                TEXT        NOT NULL,           -- raw passage text
     topic_keywords         TEXT[]      NOT NULL DEFAULT '{}', -- e.g. {"Non-violence","Colonialism"}
     ethical_dilemma_type   TEXT        DEFAULT 'None',     -- see tagging taxonomy
