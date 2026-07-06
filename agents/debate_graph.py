@@ -1,9 +1,12 @@
 import os
+import time
 from dataclasses import dataclass
 from typing import TypedDict, Annotated
 import operator
 
-import segmind
+from functools import lru_cache
+
+from segmind import SegmindClient
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
@@ -14,6 +17,19 @@ from data.retrieval_v2 import retrieve_context_for_persona
 # OpenAI's shared /v1/chat/completions — so debate turns use Segmind's
 # official SDK directly instead of langchain_openai.ChatOpenAI.
 _ROLE_MAP = {SystemMessage: "system", HumanMessage: "user"}
+
+# The module-level segmind.chat_sync() uses a lazily-built client with a
+# 30s HTTP timeout, which is too short once the prompt includes the full
+# debate transcript + persona system prompt + RAG context — later rounds
+# grow the prompt and Segmind's serverless inference has variable (cold
+# start) latency, so generous headroom + one retry is needed.
+_SEGMIND_TIMEOUT_S = 180.0
+_SEGMIND_RETRIES = 1
+
+
+@lru_cache(maxsize=1)
+def _client() -> SegmindClient:
+    return SegmindClient(timeout=_SEGMIND_TIMEOUT_S)
 
 
 @dataclass
@@ -35,13 +51,22 @@ class SegmindChatLLM:
             {"role": _ROLE_MAP.get(type(m), "user"), "content": m.content}
             for m in messages
         ]
-        reply = segmind.chat_sync(
-            self.model,
-            messages=payload,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        )
-        return _LLMResponse(content=reply.text or "")
+
+        last_exc: Exception | None = None
+        for attempt in range(_SEGMIND_RETRIES + 1):
+            try:
+                reply = _client().chat_sync(
+                    self.model,
+                    messages=payload,
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                return _LLMResponse(content=reply.text or "")
+            except Exception as exc:
+                last_exc = exc
+                if attempt < _SEGMIND_RETRIES:
+                    time.sleep(2)
+        raise last_exc
 
 
 # ── Shared state ────────────────────────────────────────────────────────────
