@@ -29,33 +29,30 @@ export default function MessageBubble({
 
   return (
     <motion.article
-      initial={{ opacity: 0, y: 14 }}
+      initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, ease: [0.21, 0.6, 0.35, 1] }}
-      className={`rounded-lg border border-arena-border border-l-2 ${
-        theme?.edge ?? "border-l-zinc-600"
-      } bg-arena-panel`}
+      transition={{ duration: 0.5, ease: [0.21, 0.6, 0.35, 1] }}
+      className={`rounded-xl border border-arena-border border-l-2 ${
+        theme?.edge ?? "border-l-white/30"
+      } bg-arena-panel backdrop-blur-sm`}
     >
       <header className="flex items-center gap-2.5 px-5 pt-4">
         <PersonaAvatar personaId={event.persona_id} emoji={emoji} size="sm" />
         <span
           className={`text-sm font-semibold tracking-wide ${
-            theme?.text ?? "text-zinc-200"
+            theme?.text ?? "text-white"
           }`}
         >
           {event.name}
         </span>
-        <span className="ml-auto text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+        <span className="ml-auto text-[10px] font-medium uppercase tracking-[0.14em] text-muted">
           {phaseLabel(event.round, maxRounds)} · Round {event.round + 1}
         </span>
       </header>
 
       <div className="px-5 pb-4 pt-3 space-y-3">
         {paragraphs.map((para, i) => (
-          <p
-            key={i}
-            className="font-serif text-[15.5px] leading-[1.75] text-zinc-200"
-          >
+          <p key={i} className="text-[15px] leading-[1.8] text-white/85">
             {para}
           </p>
         ))}

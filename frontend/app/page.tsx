@@ -2,13 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import Hero from "@/components/Hero";
 import DebateSetupForm from "@/components/DebateSetupForm";
 import DebateTranscript from "@/components/DebateTranscript";
 import { streamDebate } from "@/lib/api";
 import { personaById } from "@/lib/personas";
 import { DebateEvent, DebateStartPayload, Persona } from "@/lib/types";
 
-type Stage = "setup" | "running" | "done";
+type Stage = "hero" | "setup" | "running" | "done";
 
 // Minimum time each message stays alone on screen before the next queued
 // one appears. Turns usually arrive 15-60s apart anyway; this only matters
@@ -17,7 +18,7 @@ type Stage = "setup" | "running" | "done";
 const REVEAL_DWELL_MS = 1800;
 
 export default function Home() {
-  const [stage, setStage] = useState<Stage>("setup");
+  const [stage, setStage] = useState<Stage>("hero");
   const [payload, setPayload] = useState<DebateStartPayload | null>(null);
   const [visible, setVisible] = useState<DebateEvent[]>([]);
   const [showChunks, setShowChunks] = useState(true);
@@ -118,25 +119,50 @@ export default function Home() {
         ) ?? null
       : null;
 
+  if (stage === "hero") {
+    return <Hero onBegin={() => setStage("setup")} />;
+  }
+
   return (
-    <main className="min-h-screen px-4 py-12 sm:py-16">
-      <div className="max-w-2xl mx-auto mb-12 text-center">
-        <h1 className="font-serif text-4xl sm:text-5xl font-semibold tracking-tight text-zinc-50">
+    <main className="min-h-screen px-4 pb-16">
+      <nav className="flex items-center justify-between max-w-3xl mx-auto py-6 mb-8">
+        <button
+          onClick={() => {
+            handleReset();
+            setStage("hero");
+          }}
+          className="font-display text-2xl tracking-tight text-white"
+        >
           Debate Arena
-        </h1>
-        <p className="mt-3 text-sm text-zinc-500">
-          Gandhi, Mandela, and Marx — arguing in their own voice, grounded in
-          their real writings.
-        </p>
-      </div>
+        </button>
+        {stage !== "setup" && (
+          <button
+            onClick={handleReset}
+            className="liquid-glass rounded-full px-5 py-2 text-xs text-white hover:scale-[1.03] transition-transform"
+          >
+            New debate
+          </button>
+        )}
+      </nav>
 
       <AnimatePresence mode="wait">
         {stage === "setup" ? (
           <motion.div
             key="setup"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
           >
+            <div className="max-w-2xl mx-auto text-center mb-10">
+              <h1 className="font-display text-4xl sm:text-5xl leading-[0.95] tracking-[-1.5px] text-white">
+                Set the <em className="not-italic text-muted">stage.</em>
+              </h1>
+              <p className="mt-4 text-sm text-muted leading-relaxed">
+                Choose your debaters, put forward a motion, and watch it
+                unfold.
+              </p>
+            </div>
             <DebateSetupForm onStart={handleStart} />
           </motion.div>
         ) : (
@@ -146,23 +172,15 @@ export default function Home() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.25 }}
-              className="max-w-2xl mx-auto"
+              className="max-w-3xl mx-auto"
             >
-              <div className="flex items-start justify-between gap-4 mb-8 border-b border-arena-border pb-5">
-                <div>
-                  <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-zinc-500 mb-1">
-                    The motion
-                  </div>
-                  <div className="font-serif text-lg text-zinc-100 leading-snug">
-                    {payload.question}
-                  </div>
+              <div className="mb-10 text-center border-b border-arena-border pb-8">
+                <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted mb-3">
+                  The motion
                 </div>
-                <button
-                  onClick={handleReset}
-                  className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-md border border-arena-border text-zinc-400 hover:text-zinc-100 hover:border-zinc-600 transition-colors"
-                >
-                  New debate
-                </button>
+                <div className="font-display text-2xl sm:text-3xl text-white leading-tight max-w-2xl mx-auto">
+                  {payload.question}
+                </div>
               </div>
 
               <DebateTranscript
@@ -175,7 +193,7 @@ export default function Home() {
               />
 
               {stage === "done" && !error && (
-                <div className="mt-8 text-center text-[11px] uppercase tracking-[0.14em] text-zinc-600">
+                <div className="mt-10 text-center text-[11px] uppercase tracking-[0.18em] text-muted">
                   — Debate concluded —
                 </div>
               )}

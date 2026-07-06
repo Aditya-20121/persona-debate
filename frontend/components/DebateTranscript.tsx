@@ -42,16 +42,16 @@ export default function DebateTranscript({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.4 }}
-          className={`rounded-lg border border-arena-border border-l-2 ${
-            PERSONA_THEME[nextPersona.id]?.edge ?? "border-l-zinc-600"
-          } bg-arena-panel/60 px-5 py-4 flex items-center gap-3`}
+          className={`rounded-xl border border-arena-border border-l-2 ${
+            PERSONA_THEME[nextPersona.id]?.edge ?? "border-l-white/30"
+          } bg-arena-panel/60 backdrop-blur-sm px-5 py-4 flex items-center gap-3`}
         >
           <PersonaAvatar
             personaId={nextPersona.id}
             emoji={nextPersona.emoji}
             size="sm"
           />
-          <span className="text-sm text-zinc-400">
+          <span className="text-sm text-muted">
             {nextPersona.name} is preparing an argument
           </span>
           <TypingDots />
@@ -59,7 +59,7 @@ export default function DebateTranscript({
       )}
 
       {errorText && (
-        <div className="rounded-lg border border-red-900/60 bg-red-950/25 px-5 py-4 text-sm text-red-300">
+        <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-5 py-4 text-sm text-red-200">
           {errorText}
         </div>
       )}
@@ -73,7 +73,7 @@ function TypingDots() {
       {[0, 1, 2].map((i) => (
         <motion.span
           key={i}
-          className="w-1 h-1 rounded-full bg-zinc-500"
+          className="w-1 h-1 rounded-full bg-white/50"
           animate={{ opacity: [0.25, 1, 0.25] }}
           transition={{
             duration: 1.2,

@@ -10,35 +10,29 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-inter)", "system-ui", "sans-serif"],
-        serif: ["var(--font-newsreader)", "Georgia", "serif"],
+        body: ["var(--font-body)", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "Georgia", "serif"],
       },
       colors: {
+        // Deep navy stage — everything sits on hsl(201 100% 13%)
         arena: {
-          bg: "#0c0d10",
-          panel: "#141519",
-          raised: "#1a1c22",
-          border: "#26282f",
+          bg: "hsl(201 100% 13%)",
+          panel: "rgba(255, 255, 255, 0.04)",
+          raised: "rgba(255, 255, 255, 0.08)",
+          border: "rgba(255, 255, 255, 0.12)",
         },
-        // Neutral app accent for primary actions/focus — deliberately
-        // distinct from all three persona colors so it never reads as
-        // "this is Gandhi's/Mandela's/Marx's color".
-        accent: {
-          DEFAULT: "#818cf8",
-          hover: "#93a0fa",
-          soft: "#191a2e",
-        },
+        muted: "hsl(240 4% 66%)",
         gandhi: {
           DEFAULT: "#34d399",
-          soft: "#0d211a",
+          soft: "rgba(52, 211, 153, 0.12)",
         },
         mandela: {
           DEFAULT: "#fbbf24",
-          soft: "#241c0a",
+          soft: "rgba(251, 191, 36, 0.12)",
         },
         marx: {
           DEFAULT: "#f87171",
-          soft: "#241012",
+          soft: "rgba(248, 113, 113, 0.12)",
         },
       },
     },
