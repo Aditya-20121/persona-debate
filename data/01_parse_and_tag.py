@@ -7,46 +7,65 @@ Pipeline per PDF:
   1. Extract text page-by-page with PyMuPDF
   2. Filter boilerplate pages (TOC, copyright, index, preface)
   3. Sliding-window chunker with sentence-boundary snap (~1 500 chars / chunk)
-  4. Tag each chunk via local Qwen2.5-1.5B (Ollama) → JSON metadata
+  4. Tag each chunk via Segmind API (Llama 3.1 8B) → JSON metadata
   5. Append to data/processed/<persona>_tagged.jsonl (resume-safe)
 
 Prereqs:
-  pip install pymupdf requests
-  ollama pull qwen2.5:1.5b          # model must be running in Ollama
+  pip install pymupdf openai python-dotenv
+  SEGMIND_API_KEY set in .env
 
 Run:
-  python data/01_parse_and_tag.py
+  python data/01_parse_and_tag.py           # all three personas
+  python data/01_parse_and_tag.py gandhi    # single persona
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
 from pathlib import Path
 
 import fitz  # PyMuPDF
-import requests
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 DATA_DIR = Path(__file__).parent
 PROCESSED_DIR = DATA_DIR / "processed"
 PROCESSED_DIR.mkdir(exist_ok=True)
 
-# Each PDF filename maps to its persona_id in the debate system
 PERSONAS: dict[str, str] = {
     "gandhi.pdf": "gandhi",
     "hitler.pdf": "hitler",
     "mandela.pdf": "mandela",
 }
 
-# ── Ollama config ─────────────────────────────────────────────────────────────
-OLLAMA_BASE = "http://localhost:11434"
-OLLAMA_MODEL = "qwen2.5:1.5b"
+# ── Segmind / LLM config ──────────────────────────────────────────────────────
+_SEGMIND_MODEL = os.getenv("SEGMIND_MODEL", "llama-v3p1-8b-instruct")
+_client: OpenAI | None = None
+
+
+def _get_client() -> OpenAI:
+    global _client
+    if _client is None:
+        api_key = os.getenv("SEGMIND_API_KEY")
+        if not api_key:
+            print("[ERROR] SEGMIND_API_KEY is not set. Add it to your .env file.")
+            sys.exit(1)
+        _client = OpenAI(
+            api_key=api_key,
+            base_url=os.getenv("SEGMIND_BASE_URL", "https://api.segmind.com/v1"),
+        )
+    return _client
+
 
 # ── Chunking config ───────────────────────────────────────────────────────────
-CHUNK_TARGET_CHARS = 1_500   # ~375–400 words, ~500 BPE tokens
+CHUNK_TARGET_CHARS = 1_500
 CHUNK_OVERLAP_CHARS = 300
 MIN_CHUNK_CHARS = 200
 MIN_CHUNK_WORDS = 35
@@ -71,7 +90,6 @@ _BOILERPLATE_PHRASES = (
 )
 
 # ── LLM tagging prompt ────────────────────────────────────────────────────────
-# Keep it tight so the 1.5 B model doesn't hallucinate
 _TAGGING_PROMPT = """\
 You are an expert biographer. Read the text below and output ONLY a JSON object — \
 no explanation, no markdown, no code fences.
@@ -98,7 +116,6 @@ Example:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_pages(pdf_path: Path) -> list[dict]:
-    """Return list of {page_num, text} dicts for every page in the PDF."""
     doc = fitz.open(str(pdf_path))
     pages = []
     for idx, page in enumerate(doc, start=1):
@@ -111,36 +128,26 @@ def extract_pages(pdf_path: Path) -> list[dict]:
 
 
 def _clean_raw_text(text: str) -> str:
-    """Normalise whitespace and fix common PDF extraction artefacts."""
-    # Rejoin soft-hyphenated line breaks  ("hyphen-\nnation" → "hyphenation")
     text = re.sub(r"-\n(\w)", r"\1", text)
-    # Collapse blank lines to at most one
     text = re.sub(r"\n{3,}", "\n\n", text)
-    # Strip lines that are just a page number (isolated digit sequence)
     text = re.sub(r"(?m)^\s*\d{1,4}\s*$", "", text)
-    # Strip per-line leading/trailing whitespace
     lines = [ln.strip() for ln in text.splitlines()]
     return "\n".join(ln for ln in lines if ln).strip()
 
 
 def _is_boilerplate(text: str) -> bool:
-    """Return True if the page looks like front/back matter to skip."""
     word_count = len(text.split())
     if word_count < 30:
-        return True  # nearly empty page
+        return True
 
     lower = text.lower()
-
-    # Copyright / legal pages
     if any(phrase in lower for phrase in _BOILERPLATE_PHRASES):
         return True
 
-    # Table-of-contents: many lines with "… 123" dot-leader patterns
     dot_leader_lines = len(re.findall(r"\.{3,}\s*\d+", text))
     if dot_leader_lines >= 3:
         return True
 
-    # Index pages: dense short entries, majority lines have page refs
     lines = [ln for ln in text.splitlines() if ln.strip()]
     if lines:
         page_ref_ratio = sum(1 for ln in lines if re.search(r"\d+$", ln)) / len(lines)
@@ -155,14 +162,8 @@ def _is_boilerplate(text: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def chunk_pages(pages: list[dict]) -> list[dict]:
-    """
-    Concatenate non-boilerplate pages and apply a sliding-window splitter
-    that snaps to sentence boundaries.
-    Returns list of {chunk_index, page_num, char_start, char_end, text}.
-    """
-    # Build one big string, tracking which page each character came from
     full_text = ""
-    page_spans: list[dict] = []  # {start, end, page_num}
+    page_spans: list[dict] = []
 
     for page in pages:
         if _is_boilerplate(page["text"]):
@@ -179,9 +180,7 @@ def chunk_pages(pages: list[dict]) -> list[dict]:
         end = pos + CHUNK_TARGET_CHARS
         slice_ = full_text[pos:end]
 
-        # Snap to last sentence boundary if we're not at the very end
         if end < len(full_text):
-            # Prefer ". " boundary (avoid splitting mid-sentence)
             snap = max(
                 slice_.rfind(". "),
                 slice_.rfind(".\n"),
@@ -193,7 +192,6 @@ def chunk_pages(pages: list[dict]) -> list[dict]:
 
         text = slice_.strip()
         if len(text) >= MIN_CHUNK_CHARS and len(text.split()) >= MIN_CHUNK_WORDS:
-            # Identify which page this chunk started on
             page_num = _page_at(pos, page_spans)
             chunks.append({
                 "chunk_index": idx,
@@ -220,45 +218,41 @@ def _page_at(pos: int, spans: list[dict]) -> int | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Ollama / LLM tagging
+# Segmind / LLM tagging
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _ollama_tag(text: str, retries: int = 2) -> dict:
-    """
-    Call local Ollama to tag a chunk.  Returns metadata dict.
-    On repeated failure returns a safe default so the pipeline keeps running.
-    """
-    # Truncate to avoid blowing the small model's context (keep ~900 chars)
-    prompt = _TAGGING_PROMPT.format(text=text[:900])
+def _segmind_tag(text: str, retries: int = 2) -> dict:
+    """Call Segmind API (Llama 3.1 8B) to tag a chunk. Returns metadata dict."""
+    prompt = _TAGGING_PROMPT.format(text=text[:1_500])
 
     for attempt in range(retries + 1):
         try:
-            resp = requests.post(
-                f"{OLLAMA_BASE}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "format": "json",
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.05,   # near-deterministic for structured output
-                        "num_predict": 256,
-                        "top_p": 0.9,
+            response = _get_client().chat.completions.create(
+                model=_SEGMIND_MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You output only valid JSON. No markdown, no explanation, no code fences.",
                     },
-                },
-                timeout=90,
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.05,
+                max_tokens=256,
             )
-            resp.raise_for_status()
-            meta = json.loads(resp.json()["response"])
+            raw = response.choices[0].message.content or ""
 
-            # Validate structure
+            # Strip markdown fences if model wraps output anyway
+            raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+            raw = re.sub(r"\s*```$", "", raw)
+
+            meta = json.loads(raw)
+
             keywords = meta.get("topic_keywords", [])
             dilemma  = meta.get("ethical_dilemma_type", "None")
             summary  = meta.get("philosophical_summary", "")
 
             if not isinstance(keywords, list):
                 keywords = []
-            # Clamp list length
             keywords = [str(k) for k in keywords[:5]]
 
             return {
@@ -267,16 +261,16 @@ def _ollama_tag(text: str, retries: int = 2) -> dict:
                 "philosophical_summary": str(summary)[:300],
             }
 
-        except (json.JSONDecodeError, KeyError, AssertionError) as exc:
+        except (json.JSONDecodeError, KeyError) as exc:
             if attempt < retries:
                 time.sleep(1)
                 continue
             print(f"\n    [WARN] tag parse error (attempt {attempt+1}): {exc}")
-        except requests.RequestException as exc:
+        except Exception as exc:
             if attempt < retries:
                 time.sleep(2)
                 continue
-            print(f"\n    [WARN] Ollama request error: {exc}")
+            print(f"\n    [WARN] Segmind API error: {exc}")
 
     return {
         "topic_keywords": [],
@@ -297,7 +291,6 @@ def process_persona(pdf_name: str, persona_id: str) -> None:
 
     out_path = PROCESSED_DIR / f"{persona_id}_tagged.jsonl"
 
-    # Resume: collect already-processed chunk indices
     done: set[int] = set()
     if out_path.exists():
         with open(out_path, "r", encoding="utf-8") as fh:
@@ -333,7 +326,7 @@ def process_persona(pdf_name: str, persona_id: str) -> None:
                 flush=True,
             )
             t0 = time.time()
-            meta = _ollama_tag(chunk["text"])
+            meta = _segmind_tag(chunk["text"])
             elapsed = time.time() - t0
 
             record = {
@@ -355,25 +348,6 @@ def process_persona(pdf_name: str, persona_id: str) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Preflight check
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _check_ollama() -> bool:
-    try:
-        resp = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=5)
-        models = [m["name"] for m in resp.json().get("models", [])]
-        if not any(OLLAMA_MODEL.split(":")[0] in m for m in models):
-            print(f"[ERROR] Model '{OLLAMA_MODEL}' is not pulled in Ollama.")
-            print(f"        Run:  ollama pull {OLLAMA_MODEL}")
-            return False
-        return True
-    except Exception as exc:
-        print(f"[ERROR] Cannot reach Ollama at {OLLAMA_BASE}: {exc}")
-        print("        Make sure Ollama is running:  ollama serve")
-        return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -382,10 +356,9 @@ if __name__ == "__main__":
     print("  Debate Arena — Phase 1: Parse & Tag")
     print("=" * 60)
 
-    if not _check_ollama():
-        sys.exit(1)
+    # Fail fast if the API key is missing before processing any PDFs
+    _get_client()
 
-    # Optionally filter to a single persona: python 01_parse_and_tag.py gandhi
     target = sys.argv[1] if len(sys.argv) > 1 else None
 
     for pdf_name, persona_id in PERSONAS.items():

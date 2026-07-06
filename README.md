@@ -116,14 +116,10 @@ data/hitler.pdf
 data/mandela.pdf
 ```
 
-Run the two-phase pipeline (**requires Ollama + `qwen2.5:1.5b` for Phase 1 only**):
+Run the two-phase pipeline (requires `SEGMIND_API_KEY` in `.env`):
 
 ```bash
-# Start Ollama for the tagging step
-ollama serve
-ollama pull qwen2.5:1.5b
-
-# Phase 1 — PDF → clean chunks → LLM philosophical tagging → JSONL (~2–3 hrs, resumable)
+# Phase 1 — PDF → clean chunks → Llama 3.1 8B tagging via Segmind → JSONL (~2–3 hrs, resumable)
 python data/01_parse_and_tag.py
 
 # Phase 2 — JSONL → BGE embeddings → Supabase + BM25 index (~15 min)

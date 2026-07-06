@@ -83,12 +83,7 @@ This creates:
 
 ## Step 1 — Parse & Tag (`01_parse_and_tag.py`)
 
-**Requires:** Ollama running locally with `qwen2.5:1.5b` pulled.
-
-```bash
-ollama serve                  # keep running in a separate terminal
-ollama pull qwen2.5:1.5b
-```
+**Requires:** `SEGMIND_API_KEY` set in `.env` (same key used by the debate agents).
 
 ### What it does
 
@@ -96,7 +91,7 @@ ollama pull qwen2.5:1.5b
 2. **Clean** — rejoins hyphenated line-breaks, removes isolated page numbers, collapses whitespace
 3. **Filter** — skips boilerplate pages: TOC (dot-leader detection), copyright, bibliography, index, short pages (<30 words)
 4. **Chunk** — sliding-window splitter, ~1,500 characters per chunk, 300-character overlap, snaps to sentence boundaries
-5. **Tag** — each chunk is passed to `qwen2.5:1.5b` (local Ollama) which returns structured JSON:
+5. **Tag** — each chunk is sent to Llama 3.1 8B via Segmind API which returns structured JSON:
    - `topic_keywords` — 3–5 core themes
    - `ethical_dilemma_type` — one of 11 fixed categories (see taxonomy below)
    - `philosophical_summary` — one sentence capturing the moral stance
