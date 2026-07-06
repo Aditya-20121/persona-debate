@@ -11,9 +11,18 @@ const config: Config = {
     extend: {
       colors: {
         arena: {
-          bg: "#0b0e14",
-          panel: "#131722",
-          border: "#232838",
+          bg: "#0a0c12",
+          panel: "#12151f",
+          raised: "#171b28",
+          border: "#242938",
+        },
+        // Neutral app accent for primary actions/focus — deliberately
+        // distinct from all three persona colors so it never reads as
+        // "this is Gandhi's/Mandela's/Marx's color".
+        accent: {
+          DEFAULT: "#6366f1",
+          hover: "#7476f3",
+          soft: "#1a1b35",
         },
         gandhi: {
           DEFAULT: "#14b8a6",
@@ -27,20 +36,6 @@ const config: Config = {
           DEFAULT: "#dc2626",
           soft: "#330d0d",
         },
-      },
-      keyframes: {
-        "fade-in-up": {
-          "0%": { opacity: "0", transform: "translateY(8px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
-        },
-        "pulse-soft": {
-          "0%, 100%": { opacity: "0.5" },
-          "50%": { opacity: "1" },
-        },
-      },
-      animation: {
-        "fade-in-up": "fade-in-up 0.4s ease-out",
-        "pulse-soft": "pulse-soft 1.6s ease-in-out infinite",
       },
     },
   },

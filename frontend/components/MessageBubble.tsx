@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import { DebateEvent } from "@/lib/types";
 import { PERSONA_THEME } from "@/lib/personas";
 import PersonaAvatar from "./PersonaAvatar";
@@ -23,7 +24,12 @@ export default function MessageBubble({
   const theme = PERSONA_THEME[event.persona_id as keyof typeof PERSONA_THEME];
 
   return (
-    <div className="flex gap-3 animate-fade-in-up">
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
+      className="flex gap-3"
+    >
       <PersonaAvatar personaId={event.persona_id} emoji={emoji} />
       <div
         className={`flex-1 rounded-2xl rounded-tl-sm border ${
@@ -43,6 +49,6 @@ export default function MessageBubble({
         </p>
         {showChunks && <RetrievedChunks chunks={event.retrieved_chunks} />}
       </div>
-    </div>
+    </motion.div>
   );
 }

@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { motion } from "framer-motion";
 import { PERSONAS } from "@/lib/personas";
-import { QUESTION_GROUPS, DEFAULT_QUESTION } from "@/lib/questions";
+import { DEFAULT_QUESTION } from "@/lib/questions";
 import { DebateStartPayload } from "@/lib/types";
 import PersonaAvatar from "./PersonaAvatar";
+import QuestionPicker from "./QuestionPicker";
 
 export default function DebateSetupForm({
   onStart,
@@ -40,7 +42,6 @@ export default function DebateSetupForm({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canStart) return;
-    // Preserve the fixed mandela/gandhi/marx ordering the backend expects
     const persona_ids = PERSONAS.filter((p) => selected.has(p.id)).map(
       (p) => p.id
     );
@@ -48,9 +49,12 @@ export default function DebateSetupForm({
   }
 
   return (
-    <form
+    <motion.form
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: "easeOut" }}
       onSubmit={handleSubmit}
-      className="w-full max-w-2xl mx-auto rounded-2xl border border-arena-border bg-arena-panel/60 backdrop-blur p-6 sm:p-8 space-y-7"
+      className="w-full max-w-2xl mx-auto rounded-2xl border border-arena-border bg-arena-panel p-6 sm:p-8 space-y-7"
     >
       <div>
         <h2 className="text-sm font-semibold text-slate-300 mb-3">
@@ -60,14 +64,15 @@ export default function DebateSetupForm({
           {PERSONAS.map((p) => {
             const active = selected.has(p.id);
             return (
-              <button
+              <motion.button
                 type="button"
                 key={p.id}
                 onClick={() => togglePersona(p.id)}
-                className={`flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition-all ${
+                whileTap={{ scale: 0.97 }}
+                className={`flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${
                   active
-                    ? "border-slate-500 bg-white/5"
-                    : "border-arena-border bg-transparent opacity-50 hover:opacity-80"
+                    ? "border-slate-600 bg-white/[0.04]"
+                    : "border-arena-border bg-transparent opacity-45 hover:opacity-75"
                 }`}
               >
                 <PersonaAvatar personaId={p.id} emoji={p.emoji} size="sm" />
@@ -79,7 +84,7 @@ export default function DebateSetupForm({
                     {p.tagline}
                   </div>
                 </div>
-              </button>
+              </motion.button>
             );
           })}
         </div>
@@ -95,48 +100,35 @@ export default function DebateSetupForm({
           <h2 className="text-sm font-semibold text-slate-300">
             Debate topic
           </h2>
-          <div className="flex rounded-lg bg-black/30 p-0.5 text-xs">
-            <button
-              type="button"
-              onClick={() => setMode("preset")}
-              className={`px-3 py-1.5 rounded-md transition-colors ${
-                mode === "preset"
-                  ? "bg-slate-700 text-white"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Choose from list
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("custom")}
-              className={`px-3 py-1.5 rounded-md transition-colors ${
-                mode === "custom"
-                  ? "bg-slate-700 text-white"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Write my own
-            </button>
+          <div className="relative flex rounded-lg bg-black/25 p-0.5 text-xs">
+            {(["preset", "custom"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMode(m)}
+                className="relative px-3 py-1.5 rounded-md"
+              >
+                {mode === m && (
+                  <motion.div
+                    layoutId="mode-pill"
+                    className="absolute inset-0 rounded-md bg-arena-raised"
+                    transition={{ duration: 0.18 }}
+                  />
+                )}
+                <span
+                  className={`relative z-10 ${
+                    mode === m ? "text-white" : "text-slate-400"
+                  }`}
+                >
+                  {m === "preset" ? "Choose from list" : "Write my own"}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
 
         {mode === "preset" ? (
-          <select
-            value={presetQuestion}
-            onChange={(e) => setPresetQuestion(e.target.value)}
-            className="w-full rounded-lg bg-black/30 border border-arena-border px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-500"
-          >
-            {QUESTION_GROUPS.map((group) => (
-              <optgroup key={group.tier} label={group.tier}>
-                {group.questions.map((q) => (
-                  <option key={q} value={q}>
-                    {q}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          <QuestionPicker value={presetQuestion} onChange={setPresetQuestion} />
         ) : (
           <div>
             <textarea
@@ -145,7 +137,7 @@ export default function DebateSetupForm({
               placeholder="e.g. Is compromise with an unjust system betrayal or wisdom?"
               rows={3}
               maxLength={500}
-              className="w-full resize-none rounded-lg bg-black/30 border border-arena-border px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-500"
+              className="w-full resize-none rounded-lg bg-arena-raised border border-arena-border px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-accent transition-colors"
             />
             <div className="flex justify-between mt-1 text-[11px] text-slate-500">
               <span>5–500 characters</span>
@@ -163,7 +155,7 @@ export default function DebateSetupForm({
           <select
             value={maxRounds}
             onChange={(e) => setMaxRounds(Number(e.target.value))}
-            className="w-full rounded-lg bg-black/30 border border-arena-border px-3 py-2.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-500"
+            className="w-full rounded-lg bg-arena-raised border border-arena-border px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-accent transition-colors"
           >
             {[1, 2, 3, 4, 5].map((n) => (
               <option key={n} value={n}>
@@ -180,10 +172,10 @@ export default function DebateSetupForm({
           <button
             type="button"
             onClick={() => setShowChunks((v) => !v)}
-            className={`w-full rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors ${
+            className={`w-full rounded-lg border px-3.5 py-2.5 text-sm font-medium transition-colors ${
               showChunks
-                ? "border-teal-600/50 bg-teal-950/40 text-teal-300"
-                : "border-arena-border bg-black/30 text-slate-400"
+                ? "border-accent/40 bg-accent-soft text-accent"
+                : "border-arena-border bg-arena-raised text-slate-400"
             }`}
           >
             {showChunks ? "Show retrieved chunks" : "Hidden"}
@@ -191,13 +183,15 @@ export default function DebateSetupForm({
         </div>
       </div>
 
-      <button
+      <motion.button
         type="submit"
         disabled={!canStart}
-        className="w-full rounded-xl bg-gradient-to-r from-teal-600 via-amber-600 to-red-600 py-3.5 text-sm font-semibold text-white shadow-lg shadow-black/30 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
+        whileHover={canStart ? { scale: 1.01 } : {}}
+        whileTap={canStart ? { scale: 0.98 } : {}}
+        className="w-full rounded-xl bg-accent py-3.5 text-sm font-semibold text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent-hover"
       >
         Start Debate
-      </button>
-    </form>
+      </motion.button>
+    </motion.form>
   );
 }

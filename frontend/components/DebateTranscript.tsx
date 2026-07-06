@@ -1,6 +1,13 @@
+import { AnimatePresence, motion } from "framer-motion";
 import { DebateEvent, Persona } from "@/lib/types";
 import MessageBubble from "./MessageBubble";
 import PersonaAvatar from "./PersonaAvatar";
+
+const EMOJI_BY_PERSONA: Record<string, string> = {
+  gandhi: "🕊️",
+  mandela: "✊",
+  marx: "⚒️",
+};
 
 export default function DebateTranscript({
   messages,
@@ -19,25 +26,32 @@ export default function DebateTranscript({
 }) {
   return (
     <div className="space-y-5">
-      {messages.map((m, i) => (
-        <MessageBubble
-          key={i}
-          event={m}
-          emoji={m.persona_id ? emojiFor(m) : "🎙️"}
-          maxRounds={maxRounds}
-          showChunks={showChunks}
-        />
-      ))}
+      <AnimatePresence initial={false}>
+        {messages.map((m, i) => (
+          <MessageBubble
+            key={i}
+            event={m}
+            emoji={EMOJI_BY_PERSONA[m.persona_id] ?? "🎙️"}
+            maxRounds={maxRounds}
+            showChunks={showChunks}
+          />
+        ))}
+      </AnimatePresence>
 
       {isStreaming && nextPersona && (
-        <div className="flex gap-3 animate-pulse-soft">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex gap-3"
+        >
           <PersonaAvatar personaId={nextPersona.id} emoji={nextPersona.emoji} />
-          <div className="flex-1 rounded-2xl rounded-tl-sm border border-arena-border bg-arena-panel/60 px-4 py-3 flex items-center">
+          <div className="flex-1 rounded-2xl rounded-tl-sm border border-arena-border bg-arena-panel px-4 py-3 flex items-center gap-2.5">
             <span className="text-sm text-slate-400">
-              {nextPersona.name} is composing a response…
+              {nextPersona.name} is composing a response
             </span>
+            <TypingDots />
           </div>
-        </div>
+        </motion.div>
       )}
 
       {errorText && (
@@ -49,14 +63,22 @@ export default function DebateTranscript({
   );
 }
 
-function emojiFor(m: DebateEvent): string {
-  // messages carry name/persona_id but not emoji — this file intentionally
-  // stays decoupled from lib/personas so it works for any persona_id the
-  // backend returns, falling back to a generic mic if unknown.
-  const map: Record<string, string> = {
-    gandhi: "🕊️",
-    mandela: "✊",
-    marx: "⚒️",
-  };
-  return map[m.persona_id] ?? "🎙️";
+function TypingDots() {
+  return (
+    <div className="flex items-center gap-1">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="w-1.5 h-1.5 rounded-full bg-slate-500"
+          animate={{ y: [0, -4, 0] }}
+          transition={{
+            duration: 0.9,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: i * 0.15,
+          }}
+        />
+      ))}
+    </div>
+  );
 }
