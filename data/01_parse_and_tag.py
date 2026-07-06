@@ -53,12 +53,18 @@ PERSONAS: dict[str, str] = {
 # Main-text page range per PDF (1-based, inclusive). Pages outside the range
 # are skipped entirely — this is more reliable than heuristics for skipping
 # front matter (contents, copyright) and back matter (index, bibliography).
-# Open each PDF once, note where the actual text starts/ends, and set it here.
 # None = no manual range; fall back to heuristic boilerplate detection only.
-# (.docx files have no pages — ranges do not apply to them.)
 PAGE_RANGES: dict[str, tuple[int, int] | None] = {
-    "gandhi.pdf": None,   # TODO: set after eyeballing, e.g. (9, 380)
-    "mandela.pdf": None,  # TODO: set after eyeballing
+    "gandhi.pdf": (21, 554),
+    "mandela.pdf": (11, 429),
+}
+
+# .docx files carry no page information, so trimming is done by non-empty
+# paragraph position instead (0-based, [start, end) — end exclusive).
+# karl-marx.docx: body text runs from the "IDEAS" heading (43) up to the
+# BIBLIOGRAPHY heading (1287); everything outside is front/back matter.
+DOCX_PARA_RANGES: dict[str, tuple[int, int] | None] = {
+    "karl-marx.docx": (43, 1287),
 }
 
 # ── Segmind / LLM config ──────────────────────────────────────────────────────
@@ -164,6 +170,10 @@ def _extract_docx(docx_path: Path) -> list[dict]:
 
     doc = Document(str(docx_path))
     paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+
+    para_range = DOCX_PARA_RANGES.get(docx_path.name)
+    if para_range:
+        paragraphs = paragraphs[para_range[0]:para_range[1]]
 
     # Group paragraphs into synthetic pages so downstream chunking/boilerplate
     # filtering works the same as for PDFs.
