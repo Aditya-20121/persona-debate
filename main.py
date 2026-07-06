@@ -112,6 +112,7 @@ async def start_debate(payload: DebateStartRequest):
                         name=msg["name"],
                         text=msg["text"],
                         round=msg["round"],
+                        retrieved_chunks=msg.get("retrieved_chunks", []),
                     )
                     yield {"data": event.model_dump_json()}
                     await asyncio.sleep(0)  # yield control to event loop

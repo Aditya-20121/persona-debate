@@ -196,27 +196,35 @@ def _format_chunks(fused: list[dict]) -> str:
 # Public API  (same signature as the original agents/retrieval.py)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def retrieve_context_for_persona(
+# Fields surfaced to API clients (e.g. a frontend "show retrieved chunks"
+# panel). Excludes internal fields like similarity/bm25_score, which are
+# inconsistently present depending on whether a chunk came from the dense
+# or sparse retriever.
+_CHUNK_DISPLAY_FIELDS = (
+    "content",
+    "topic_keywords",
+    "ethical_dilemma_type",
+    "philosophical_summary",
+    "chunk_index",
+    "page_num",
+)
+
+
+def retrieve_context_and_chunks_for_persona(
     persona_id: str,
     query:      str,
     k:          int = 5,
-) -> str:
+) -> tuple[str, list[dict]]:
     """
     Retrieve the top-k most relevant passages for *persona_id* given *query*.
 
-    Uses dense (BGE cosine) + sparse (BM25) search fused via RRF.
-    Returns a formatted string ready to be injected into the LLM system prompt.
-    Returns "" on any failure so the debate continues without context.
+    Uses dense (BGE cosine) + sparse (BM25) search fused via RRF. Does the
+    embed + search + fuse pipeline exactly once, returning both:
+      - a formatted string ready to inject into the LLM system prompt
+      - the raw fused chunk dicts, for display in a client (e.g. a "show
+        retrieved context" panel in a frontend)
 
-    Parameters
-    ----------
-    persona_id : str   one of "gandhi", "mandela", "marx"
-    query      : str   the debate question / topic
-    k          : int   final number of passages to return after fusion
-
-    Returns
-    -------
-    str  formatted context block, or "" if retrieval fails
+    Returns ("", []) on any failure so the debate continues without context.
     """
     try:
         fetch_k = k * 3   # over-fetch before fusion so RRF has room to rerank
@@ -227,14 +235,29 @@ def retrieve_context_for_persona(
         fused      = _rrf_fuse(dense, sparse, top_k=k)
 
         if not fused:
-            return ""
+            return "", []
 
-        return _format_chunks(fused)
+        display_chunks = [
+            {field: doc.get(field) for field in _CHUNK_DISPLAY_FIELDS}
+            for doc in fused
+        ]
+        return _format_chunks(fused), display_chunks
 
     except FileNotFoundError as exc:
         # BM25 index missing — probably haven't run Phase 2 yet
         print(f"[WARN] {exc}")
-        return ""
+        return "", []
     except Exception as exc:
         print(f"[WARN] Retrieval failed for persona='{persona_id}': {exc}")
-        return ""
+        return "", []
+
+
+def retrieve_context_for_persona(
+    persona_id: str,
+    query:      str,
+    k:          int = 5,
+) -> str:
+    """Same as retrieve_context_and_chunks_for_persona but returns only the
+    formatted string. Kept for callers that don't need the raw chunks."""
+    context, _chunks = retrieve_context_and_chunks_for_persona(persona_id, query, k)
+    return context

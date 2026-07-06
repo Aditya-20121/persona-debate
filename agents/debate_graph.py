@@ -11,7 +11,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
 from agents.personas import PERSONAS, PersonaConfig
-from data.retrieval_v2 import retrieve_context_for_persona
+from data.retrieval_v2 import retrieve_context_and_chunks_for_persona
 
 # Segmind's REST contract is POST /v1/<model-name> (model in the path), not
 # OpenAI's shared /v1/chat/completions — so debate turns use Segmind's
@@ -76,6 +76,7 @@ class DebateMessage(TypedDict):
     name: str
     text: str
     round: int
+    retrieved_chunks: list[dict]
 
 
 class DebateState(TypedDict):
@@ -127,7 +128,7 @@ def make_agent_node(persona: PersonaConfig):
             )
 
         # Retrieve grounded knowledge (non-fatal if unavailable)
-        retrieved_context = retrieve_context_for_persona(
+        retrieved_context, retrieved_chunks = retrieve_context_and_chunks_for_persona(
             persona_id=persona["id"],
             query=retrieval_query,
             k=3,
@@ -187,6 +188,7 @@ def make_agent_node(persona: PersonaConfig):
             "name": persona["name"],
             "text": response.content,
             "round": state["current_round"],
+            "retrieved_chunks": retrieved_chunks,
         }
 
         return {"history": [new_message]}
