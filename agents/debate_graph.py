@@ -2,7 +2,7 @@ import os
 from typing import TypedDict, Annotated
 import operator
 
-from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
@@ -30,11 +30,12 @@ class DebateState(TypedDict):
 
 # ── Build LLM ────────────────────────────────────────────────────────────────
 
-def get_llm() -> ChatOllama:
-    return ChatOllama(
-        model=os.getenv("OLLAMA_MODEL", "gemma3:4b-it-q8_0"),
-        base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-        num_predict=900,
+def get_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model=os.getenv("SEGMIND_MODEL", "llama-v3p1-8b-instruct"),
+        api_key=os.getenv("SEGMIND_API_KEY"),
+        base_url=os.getenv("SEGMIND_BASE_URL", "https://api.segmind.com/v1"),
+        max_tokens=900,
         temperature=0.7,
     )
 

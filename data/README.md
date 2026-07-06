@@ -258,7 +258,7 @@ debate question
                           (next passage)
                                           │
                                           ▼
-                          injected into Gemma 3 system prompt
+                          injected into Llama 3.1 8B system prompt
 ```
 
 ### Design decisions

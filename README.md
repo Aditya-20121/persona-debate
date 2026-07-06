@@ -1,9 +1,9 @@
 # Debate Arena — Backend
 
 FastAPI backend that powers the multi-agent debate system. Uses **LangGraph** to orchestrate
-sequential AI personas, **Gemma 3 4B Q8** (local via Ollama, zero API cost) for debate responses,
+sequential AI personas, **Llama 3.1 8B** (via Segmind API) for debate responses,
 **BGE-large-en-v1.5** (local) for dense embeddings, and **Supabase pgvector + BM25** for hybrid
-retrieval. All LLM inference runs on a local GPU — no external API keys required for debate.
+retrieval.
 
 ---
 
@@ -13,27 +13,14 @@ retrieval. All LLM inference runs on a local GPU — no external API keys requir
 |---|---|
 | API framework | FastAPI + Uvicorn |
 | Agent orchestration | LangGraph |
-| Debate LLM | Gemma 3 4B (Q8_0) — local via Ollama (`langchain-ollama`) |
-| Tagging LLM (pipeline only) | Qwen2.5 1.5B — local via Ollama |
+| Debate LLM | Llama 3.1 8B — Segmind API (`langchain-openai`, OpenAI-compatible) |
+| Tagging LLM (data pipeline only) | Qwen2.5 1.5B — local via Ollama |
 | Dense embeddings | `BAAI/bge-large-en-v1.5` — local via `sentence-transformers` |
-| Sparse index | BM25Okapi (`rank-bm25`, file `data/bm25_index.pkl`) |
+| Sparse index | BM25Okapi (`rank-bm25`, persisted to `data/bm25_index.pkl`) |
 | Vector store | Supabase pgvector (`persona_chunks` table) |
 | Retrieval strategy | Dense + sparse fused with Reciprocal Rank Fusion (RRF) |
 | Streaming | `sse-starlette` (Server-Sent Events) |
 | Validation | Pydantic v2 |
-
----
-
-## GPU Memory Layout
-
-Both models fit simultaneously on an 8 GB GPU:
-
-| Component | VRAM |
-|---|---|
-| Gemma 3 4B Q8 (Ollama, debate LLM) | ~4.5 GB |
-| BGE-large-en-v1.5 (sentence-transformers, retrieval) | ~1.3 GB |
-| Overhead | ~0.5 GB |
-| **Total** | **~6.3 GB** |
 
 ---
 
@@ -48,7 +35,7 @@ debate-ai-backend/
 │
 ├── agents/
 │   ├── personas.py              # Persona configs + system prompts + few-shot examples
-│   └── debate_graph.py          # LangGraph state machine (uses Gemma 3 via Ollama)
+│   └── debate_graph.py          # LangGraph state machine (Llama 3.1 8B via Segmind)
 │
 ├── models/
 │   └── schemas.py               # Pydantic request/response models
@@ -66,104 +53,84 @@ debate-ai-backend/
 
 ## Prerequisites
 
-### Hardware
-- **GPU**: 8 GB VRAM (RTX 3070 / 4060 class or better)
-- **RAM**: 16 GB recommended (BGE model + Supabase client + FastAPI)
-- **Disk**: ~7 GB free (Gemma 3 Q8 ~4.5 GB + BGE-large ~1.3 GB + processed data)
-
-### Software
 - Python 3.10+
-- [Ollama](https://ollama.com) installed and running
+- A [Segmind](https://segmind.com) account with API access to `llama-v3p1-8b-instruct`
+- A [Supabase](https://supabase.com) project (free tier works)
+- GPU with ~1.3 GB VRAM for BGE-large embeddings at retrieval time
+- [Ollama](https://ollama.com) — only needed for the one-time data pipeline (PDF tagging)
 
 ---
 
-## Setup (Step by Step)
+## Setup
 
-### Step 1 — Clone and install Python dependencies
+### Step 1 — Clone and install dependencies
 
 ```bash
-git clone https://github.com/peshkash17/debate-ai-backend.git
-cd debate-ai-backend
+git clone https://github.com/Aditya-20121/persona-debate.git
+cd persona-debate
 
 pip install -r requirements.txt
 pip install -r data/requirements_rag.txt
 ```
 
-### Step 2 — Install Ollama and pull both models
-
-```bash
-# macOS/Linux
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Windows: download installer from https://ollama.com
-
-# Start the Ollama server (keep this terminal open)
-ollama serve
-
-# In a new terminal, pull the two models used by the system:
-ollama pull gemma3:4b-it-q8_0     # Debate LLM — ~4.5 GB download
-ollama pull qwen2.5:1.5b           # Tagging LLM (Phase 1 pipeline only) — ~1 GB download
-```
-
-### Step 3 — Configure environment variables
+### Step 2 — Configure environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your values:
+Edit `.env`:
 
 ```env
-# Ollama — local LLM for debate responses (no API key needed)
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=gemma3:4b-it-q8_0
+# Segmind — Llama 3.1 8B serverless API
+SEGMIND_API_KEY=your_segmind_api_key_here
+SEGMIND_BASE_URL=https://api.segmind.com/v1
+SEGMIND_MODEL=llama-v3p1-8b-instruct
 
 # Supabase — pgvector knowledge store
 SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_SERVICE_KEY=your_supabase_service_role_key_here
 ```
 
-> **Where to get Supabase credentials:**
-> 1. Create a free project at [supabase.com](https://supabase.com)
-> 2. Go to **Project Settings → API**
-> 3. Copy **Project URL** → `SUPABASE_URL`
-> 4. Copy **service_role** key (not anon key) → `SUPABASE_SERVICE_KEY`
+> **Segmind API key:** Sign in at [segmind.com](https://segmind.com) → API Keys → Create key.
+>
+> **Supabase credentials:** Project Settings → API → copy Project URL and `service_role` key.
 
-### Step 4 — Set up the Supabase schema
+### Step 3 — Set up the Supabase schema
 
-Open your Supabase project → **SQL Editor** → paste and run the contents of
-`data/supabase_v2_setup.sql`.
+Open your Supabase project → **SQL Editor** → paste and run `data/supabase_v2_setup.sql`.
 
 This creates:
 - `persona_chunks` table with `VECTOR(1024)` column
-- B-tree index on `persona_id`
-- GIN index on `topic_keywords`
+- Indexes on `persona_id` and `topic_keywords`
 - `match_persona_chunks(query_embedding, match_count, p_persona_id)` SQL function
 
-> ⚠️ **Do not create the IVFFlat index yet.** It must be built after data is
-> loaded (Step 5). The setup SQL has the command commented out with instructions.
+> ⚠️ Do not create the IVFFlat index yet — it must be built after data is loaded (Step 4).
 
-### Step 5 — Build the RAG knowledge base (one-time, ~3 hours)
+### Step 4 — Build the RAG knowledge base (one-time)
 
-Place the three biography PDFs in the `data/` folder:
+Place the three biography PDFs in `data/`:
 ```
 data/gandhi.pdf
 data/hitler.pdf
 data/mandela.pdf
 ```
 
-Then run the two-phase pipeline:
+Run the two-phase pipeline (**requires Ollama + `qwen2.5:1.5b` for Phase 1 only**):
 
 ```bash
-# Phase 1: PDF → clean chunks → Qwen2.5 philosophical tagging → JSONL
-# Fully resumable — safe to Ctrl-C and restart at any time
+# Start Ollama for the tagging step
+ollama serve
+ollama pull qwen2.5:1.5b
+
+# Phase 1 — PDF → clean chunks → LLM philosophical tagging → JSONL (~2–3 hrs, resumable)
 python data/01_parse_and_tag.py
 
-# Phase 2: JSONL → BGE-large embeddings → Supabase upsert + BM25 index
+# Phase 2 — JSONL → BGE embeddings → Supabase + BM25 index (~15 min)
 python data/02_embed_and_store.py
 ```
 
-After Phase 2 completes, run this in Supabase SQL editor to build the vector index:
+After Phase 2, run this in Supabase SQL editor to build the vector similarity index:
 
 ```sql
 CREATE INDEX idx_persona_chunks_embedding
@@ -172,18 +139,12 @@ CREATE INDEX idx_persona_chunks_embedding
     WITH (lists = 50);
 ```
 
-For the full pipeline walkthrough including expected output, timing, and troubleshooting,
-see **[data/README.md](data/README.md)**.
+See **[data/README.md](data/README.md)** for the full pipeline walkthrough.
 
-### Step 6 — Start the server
+### Step 5 — Start the server
 
 ```bash
 python main.py
-```
-
-```
-INFO:     Uvicorn running on http://0.0.0.0:8000
-INFO:     Debate API starting up...
 ```
 
 - API: `http://localhost:8000`
@@ -200,11 +161,8 @@ Each persona (`agents/personas.py`) is configured with:
 1. **Identity + worldview** — who they are and the philosophical foundation they argue from
 2. **Rhetorical style** — specific patterns (Gandhi's Socratic questions, Mandela's testimony, Hitler's zero-sum framing)
 3. **Debate stance** — how they position against each other specifically
-4. **Two few-shot examples** — concrete 4-6 sentence responses calibrated to the exact voice, so Gemma 3 has a template to match rather than inferring style purely from description
+4. **Two few-shot examples** — concrete 4-6 sentence responses calibrated to the exact voice, giving the LLM a sound to match rather than a description to interpret
 5. **Hard rules** — sentence count, required rhetorical moves, no bullet points, no meta-commentary
-
-The few-shot examples are the most important calibration layer for a local 4B model. They show
-the model exactly what "Gandhi arguing about violence" *sounds like*, not just what Gandhi believed.
 
 ### LangGraph State Machine
 
@@ -224,8 +182,8 @@ the model exactly what "Gandhi arguing about violence" *sounds like*, not just w
 **Each agent node per turn:**
 1. Calls `retrieve_context_for_persona()` — hybrid RAG (dense + BM25 + RRF)
 2. Injects top-5 retrieved passages with philosophical metadata headers into system prompt
-3. Builds phase-appropriate user prompt (opening / rebuttal / closing instruction)
-4. Calls **Gemma 3 4B Q8** via Ollama — `num_predict=900`, `temperature=0.7`
+3. Builds phase-appropriate user prompt (opening / rebuttal / closing)
+4. Calls **Llama 3.1 8B** via Segmind API — `max_tokens=900`, `temperature=0.7`
 5. Appends response to shared history
 
 ### Hybrid RAG Retrieval
@@ -233,36 +191,33 @@ the model exactly what "Gandhi arguing about violence" *sounds like*, not just w
 ```
 Debate question
       │
-      ├── BGE-large-en-v1.5 (local GPU) ──► Supabase cosine search ─┐
-      │   encode with query prefix          filtered by persona_id    │
-      │                                     top 15 dense results      │
-      │                                                               ├── RRF fusion (k=60) ──► top 5
-      └── BM25Okapi (in-memory) ────────► persona-filtered keyword ──┘
-          from bm25_index.pkl               search, top 15 sparse results
-                                                     │
-                                                     ▼
-                                 [Theme: Non-violence, Civil Disobedience]
-                                 [Dilemma type: Violence vs. Non-violence]
-                                 [Stance: Soul-force prevails over brute force.]
-                                 <raw passage text>
-                                                     │
-                                                     ▼
-                                 Injected into Gemma 3 system prompt
+      ├── BGE-large-en-v1.5 (local) ──► Supabase cosine search ──────────┐
+      │   encode with query prefix       filtered by persona_id           │
+      │                                  top 15 dense results             ├── RRF (k=60) ──► top 5
+      └── BM25Okapi (in-memory) ───────► persona-filtered keyword search ─┘
+          from bm25_index.pkl            top 15 sparse results
+                                                  │
+                                                  ▼
+                              [Theme: Non-violence, Civil Disobedience]
+                              [Dilemma type: Violence vs. Non-violence]
+                              [Stance: Soul-force prevails over brute force.]
+                              <raw passage text>
+                                                  │
+                                                  ▼
+                              Injected into Llama 3.1 8B system prompt
 ```
 
-The philosophical metadata headers (theme, ethical dilemma type, moral stance) prime Gemma 3
-with the persona's *mindset* before it reads the raw evidence — this is what separates persona
-simulation from plain fact retrieval.
+The philosophical metadata headers prime the LLM with the persona's *mindset* before the raw
+evidence — separating persona simulation from plain fact retrieval.
 
 ### SSE Streaming
 
-`POST /debate/start` streams back Server-Sent Events as each agent turn completes:
+`POST /debate/start` streams each agent turn as a Server-Sent Event:
 
 ```
 data: {"type":"message","persona_id":"mandela","name":"Nelson Mandela","text":"...","round":0}
 data: {"type":"message","persona_id":"gandhi","name":"Mahatma Gandhi","text":"...","round":0}
 data: {"type":"message","persona_id":"hitler","name":"Adolf Hitler","text":"...","round":0}
-data: {"type":"message","persona_id":"mandela","name":"Nelson Mandela","text":"...","round":1}
 ...
 data: {"type":"done"}
 ```
@@ -279,7 +234,6 @@ data: {"type":"done"}
 
 ### POST /debate/start
 
-**Request body:**
 ```json
 {
   "question": "Is violence ever justified in the pursuit of justice?",
@@ -300,8 +254,9 @@ data: {"type":"done"}
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `OLLAMA_BASE_URL` | No | `http://localhost:11434` | Ollama server address |
-| `OLLAMA_MODEL` | No | `gemma3:4b-it-q8_0` | Ollama model tag for debate LLM |
+| `SEGMIND_API_KEY` | Yes | — | Segmind API key |
+| `SEGMIND_BASE_URL` | No | `https://api.segmind.com/v1` | Segmind API base URL |
+| `SEGMIND_MODEL` | No | `llama-v3p1-8b-instruct` | Model identifier |
 | `SUPABASE_URL` | Yes | — | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Yes | — | Service role key (bypasses RLS) |
 
@@ -309,20 +264,15 @@ data: {"type":"done"}
 
 ## Troubleshooting
 
-**`ollama: connection refused`**
-Ollama server isn't running. Start it with `ollama serve` in a separate terminal.
+**`401 Unauthorized` from Segmind**
+Check that `SEGMIND_API_KEY` is set correctly in `.env` and has not expired.
 
-**`model not found: gemma3:4b-it-q8_0`**
-Pull the model first: `ollama pull gemma3:4b-it-q8_0`
+**`404 model not found` from Segmind**
+Verify `SEGMIND_MODEL=llama-v3p1-8b-instruct` matches the model name exactly as shown at
+[segmind.com/models/llama-v3p1-8b-instruct](https://www.segmind.com/models/llama-v3p1-8b-instruct/api).
 
 **`FileNotFoundError: BM25 index not found at data/bm25_index.pkl`**
-Phase 2 hasn't been run yet, or was interrupted. Run `python data/02_embed_and_store.py`.
+Phase 2 of the data pipeline hasn't been run yet. Run `python data/02_embed_and_store.py`.
 
-**`CUDA out of memory`**
-Close other GPU processes. If the issue persists, set `OLLAMA_NUM_GPU=0` in your shell to
-force Ollama to CPU (slower but safe), and BGE-large will remain on GPU.
-
-**Gemma 3 ignoring character instructions / breaking persona**
-This is a known limitation of smaller local models. The few-shot examples in `agents/personas.py`
-are the primary mitigation. If persona drift is severe, reduce `temperature` from `0.7` to `0.4`
-in `debate_graph.py → get_llm()`.
+**Persona breaking character / ignoring instructions**
+Reduce `temperature` from `0.7` to `0.4` in `debate_graph.py → get_llm()`.
