@@ -46,6 +46,11 @@ CREATE INDEX IF NOT EXISTS idx_persona_chunks_keywords
 --    Step A (this file, before Phase 2): creates table + GIN + B-tree indexes.
 --    Step B (after Phase 2 completes):  paste and run the block below.
 --
+-- If you hit "memory required is X MB, maintenance_work_mem is 32 MB"
+-- (common on Supabase's free tier default), bump it for this session first:
+--
+-- SET maintenance_work_mem = '64MB';
+--
 -- CREATE INDEX idx_persona_chunks_embedding
 --     ON persona_chunks
 --     USING ivfflat (embedding vector_cosine_ops)
