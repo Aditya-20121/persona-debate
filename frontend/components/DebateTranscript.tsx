@@ -44,7 +44,7 @@ export default function DebateTranscript({
           transition={{ delay: 0.4 }}
           className={`rounded-xl border border-arena-border border-l-2 ${
             PERSONA_THEME[nextPersona.id]?.edge ?? "border-l-white/30"
-          } bg-arena-panel/60 backdrop-blur-sm px-5 py-4 flex items-center gap-3`}
+          } bg-arena-panel backdrop-blur-sm px-5 py-4 flex items-center gap-3`}
         >
           <PersonaAvatar
             personaId={nextPersona.id}
