@@ -16,8 +16,9 @@ Prereqs:
   SEGMIND_API_KEY set in .env
 
 Run:
-  python data/01_parse_and_tag.py           # all personas
-  python data/01_parse_and_tag.py gandhi    # single persona
+  python data/01_parse_and_tag.py                     # all personas
+  python data/01_parse_and_tag.py gandhi              # single persona
+  python data/01_parse_and_tag.py gandhi --limit 10   # smoke test: only first 10 chunks
 """
 
 from __future__ import annotations
@@ -351,7 +352,7 @@ def _segmind_tag(text: str, retries: int = 2) -> dict:
 # Per-persona processing
 # ─────────────────────────────────────────────────────────────────────────────
 
-def process_persona(doc_name: str, persona_id: str) -> None:
+def process_persona(doc_name: str, persona_id: str, limit: int | None = None) -> None:
     doc_path = DATA_DIR / doc_name
     if not doc_path.exists():
         print(f"  [SKIP] {doc_path} not found.")
@@ -382,6 +383,9 @@ def process_persona(doc_name: str, persona_id: str) -> None:
         print(f"  Already tagged       : {len(done)}  (resuming from last checkpoint)")
 
     remaining = [c for c in chunks if c["chunk_index"] not in done]
+    if limit is not None:
+        remaining = remaining[:limit]
+        print(f"  LIMIT active         : tagging only {len(remaining)} chunks (smoke test)")
     print(f"  Chunks to process    : {len(remaining)}  ({PARALLEL_WORKERS} parallel workers)")
 
     if not remaining:
@@ -437,12 +441,18 @@ if __name__ == "__main__":
     # Fail fast if the API key is missing before processing any documents
     _get_client()
 
-    target = sys.argv[1] if len(sys.argv) > 1 else None
+    args = sys.argv[1:]
+    limit: int | None = None
+    if "--limit" in args:
+        i = args.index("--limit")
+        limit = int(args[i + 1])
+        args = args[:i] + args[i + 2:]
+    target = args[0] if args else None
 
     for doc_name, persona_id in PERSONAS.items():
         if target and persona_id != target:
             continue
-        process_persona(doc_name, persona_id)
+        process_persona(doc_name, persona_id, limit=limit)
 
     print("\n" + "=" * 60)
     print("  Phase 1 complete — tagged JSONL files are in data/processed/")
