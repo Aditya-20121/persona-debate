@@ -22,33 +22,46 @@ export default function MessageBubble({
   showChunks: boolean;
 }) {
   const theme = PERSONA_THEME[event.persona_id as keyof typeof PERSONA_THEME];
+  const paragraphs = event.text
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
+    <motion.article
+      initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: "easeOut" }}
-      className="flex gap-3"
+      transition={{ duration: 0.45, ease: [0.21, 0.6, 0.35, 1] }}
+      className={`rounded-lg border border-arena-border border-l-2 ${
+        theme?.edge ?? "border-l-zinc-600"
+      } bg-arena-panel`}
     >
-      <PersonaAvatar personaId={event.persona_id} emoji={emoji} />
-      <div
-        className={`flex-1 rounded-2xl rounded-tl-sm border ${
-          theme?.border ?? "border-arena-border"
-        } ${theme?.bg ?? "bg-arena-panel"} px-4 py-3`}
-      >
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className={`font-semibold ${theme?.text ?? "text-slate-200"}`}>
-            {event.name}
-          </span>
-          <span className="text-[11px] uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-black/30 text-slate-400">
-            {phaseLabel(event.round, maxRounds)} · Round {event.round + 1}
-          </span>
-        </div>
-        <p className="text-slate-200 leading-relaxed whitespace-pre-wrap">
-          {event.text}
-        </p>
+      <header className="flex items-center gap-2.5 px-5 pt-4">
+        <PersonaAvatar personaId={event.persona_id} emoji={emoji} size="sm" />
+        <span
+          className={`text-sm font-semibold tracking-wide ${
+            theme?.text ?? "text-zinc-200"
+          }`}
+        >
+          {event.name}
+        </span>
+        <span className="ml-auto text-[10px] font-medium uppercase tracking-[0.12em] text-zinc-500">
+          {phaseLabel(event.round, maxRounds)} · Round {event.round + 1}
+        </span>
+      </header>
+
+      <div className="px-5 pb-4 pt-3 space-y-3">
+        {paragraphs.map((para, i) => (
+          <p
+            key={i}
+            className="font-serif text-[15.5px] leading-[1.75] text-zinc-200"
+          >
+            {para}
+          </p>
+        ))}
+
         {showChunks && <RetrievedChunks chunks={event.retrieved_chunks} />}
       </div>
-    </motion.div>
+    </motion.article>
   );
 }

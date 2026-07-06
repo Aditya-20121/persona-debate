@@ -9,32 +9,36 @@ const config: Config = {
   darkMode: "class",
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-inter)", "system-ui", "sans-serif"],
+        serif: ["var(--font-newsreader)", "Georgia", "serif"],
+      },
       colors: {
         arena: {
-          bg: "#0a0c12",
-          panel: "#12151f",
-          raised: "#171b28",
-          border: "#242938",
+          bg: "#0c0d10",
+          panel: "#141519",
+          raised: "#1a1c22",
+          border: "#26282f",
         },
         // Neutral app accent for primary actions/focus — deliberately
         // distinct from all three persona colors so it never reads as
         // "this is Gandhi's/Mandela's/Marx's color".
         accent: {
-          DEFAULT: "#6366f1",
-          hover: "#7476f3",
-          soft: "#1a1b35",
+          DEFAULT: "#818cf8",
+          hover: "#93a0fa",
+          soft: "#191a2e",
         },
         gandhi: {
-          DEFAULT: "#14b8a6",
-          soft: "#0f2e2a",
+          DEFAULT: "#34d399",
+          soft: "#0d211a",
         },
         mandela: {
-          DEFAULT: "#d97706",
-          soft: "#332209",
+          DEFAULT: "#fbbf24",
+          soft: "#241c0a",
         },
         marx: {
-          DEFAULT: "#dc2626",
-          soft: "#330d0d",
+          DEFAULT: "#f87171",
+          soft: "#241012",
         },
       },
     },

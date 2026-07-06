@@ -54,10 +54,10 @@ export default function DebateSetupForm({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: "easeOut" }}
       onSubmit={handleSubmit}
-      className="w-full max-w-2xl mx-auto rounded-2xl border border-arena-border bg-arena-panel p-6 sm:p-8 space-y-7"
+      className="w-full max-w-2xl mx-auto rounded-xl border border-arena-border bg-arena-panel p-6 sm:p-8 space-y-8"
     >
       <div>
-        <h2 className="text-sm font-semibold text-slate-300 mb-3">
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500 mb-3">
           Debaters
         </h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -69,18 +69,18 @@ export default function DebateSetupForm({
                 key={p.id}
                 onClick={() => togglePersona(p.id)}
                 whileTap={{ scale: 0.97 }}
-                className={`flex items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors ${
+                className={`flex items-center gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
                   active
-                    ? "border-slate-600 bg-white/[0.04]"
-                    : "border-arena-border bg-transparent opacity-45 hover:opacity-75"
+                    ? "border-zinc-600 bg-arena-raised"
+                    : "border-arena-border bg-transparent opacity-40 hover:opacity-70"
                 }`}
               >
                 <PersonaAvatar personaId={p.id} emoji={p.emoji} size="sm" />
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-slate-100 truncate">
+                  <div className="text-sm font-medium text-zinc-100 truncate">
                     {p.name}
                   </div>
-                  <div className="text-[11px] text-slate-400 truncate">
+                  <div className="text-[11px] text-zinc-500 truncate">
                     {p.tagline}
                   </div>
                 </div>
@@ -97,27 +97,27 @@ export default function DebateSetupForm({
 
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-slate-300">
-            Debate topic
+          <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500">
+            The motion
           </h2>
-          <div className="relative flex rounded-lg bg-black/25 p-0.5 text-xs">
+          <div className="relative flex rounded-md bg-black/25 p-0.5 text-xs">
             {(["preset", "custom"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
                 onClick={() => setMode(m)}
-                className="relative px-3 py-1.5 rounded-md"
+                className="relative px-3 py-1.5 rounded"
               >
                 {mode === m && (
                   <motion.div
                     layoutId="mode-pill"
-                    className="absolute inset-0 rounded-md bg-arena-raised"
+                    className="absolute inset-0 rounded bg-arena-raised border border-arena-border"
                     transition={{ duration: 0.18 }}
                   />
                 )}
                 <span
                   className={`relative z-10 ${
-                    mode === m ? "text-white" : "text-slate-400"
+                    mode === m ? "text-zinc-100" : "text-zinc-500"
                   }`}
                 >
                   {m === "preset" ? "Choose from list" : "Write my own"}
@@ -137,9 +137,9 @@ export default function DebateSetupForm({
               placeholder="e.g. Is compromise with an unjust system betrayal or wisdom?"
               rows={3}
               maxLength={500}
-              className="w-full resize-none rounded-lg bg-arena-raised border border-arena-border px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-accent transition-colors"
+              className="w-full resize-none rounded-lg bg-arena-raised border border-arena-border px-3.5 py-2.5 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-accent transition-colors"
             />
-            <div className="flex justify-between mt-1 text-[11px] text-slate-500">
+            <div className="flex justify-between mt-1 text-[11px] text-zinc-600">
               <span>5–500 characters</span>
               <span>{customQuestion.length}/500</span>
             </div>
@@ -149,13 +149,13 @@ export default function DebateSetupForm({
 
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="text-sm font-semibold text-slate-300 block mb-2">
+          <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500 block mb-2">
             Rounds
           </label>
           <select
             value={maxRounds}
             onChange={(e) => setMaxRounds(Number(e.target.value))}
-            className="w-full rounded-lg bg-arena-raised border border-arena-border px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-accent transition-colors"
+            className="w-full rounded-lg bg-arena-raised border border-arena-border px-3.5 py-2.5 text-sm text-zinc-100 focus:outline-none focus:border-accent transition-colors"
           >
             {[1, 2, 3, 4, 5].map((n) => (
               <option key={n} value={n}>
@@ -166,7 +166,7 @@ export default function DebateSetupForm({
         </div>
 
         <div>
-          <label className="text-sm font-semibold text-slate-300 block mb-2">
+          <label className="text-[11px] font-semibold uppercase tracking-[0.14em] text-zinc-500 block mb-2">
             RAG grounding
           </label>
           <button
@@ -175,7 +175,7 @@ export default function DebateSetupForm({
             className={`w-full rounded-lg border px-3.5 py-2.5 text-sm font-medium transition-colors ${
               showChunks
                 ? "border-accent/40 bg-accent-soft text-accent"
-                : "border-arena-border bg-arena-raised text-slate-400"
+                : "border-arena-border bg-arena-raised text-zinc-500"
             }`}
           >
             {showChunks ? "Show retrieved chunks" : "Hidden"}
@@ -186,11 +186,11 @@ export default function DebateSetupForm({
       <motion.button
         type="submit"
         disabled={!canStart}
-        whileHover={canStart ? { scale: 1.01 } : {}}
-        whileTap={canStart ? { scale: 0.98 } : {}}
-        className="w-full rounded-xl bg-accent py-3.5 text-sm font-semibold text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed hover:bg-accent-hover"
+        whileHover={canStart ? { scale: 1.005 } : {}}
+        whileTap={canStart ? { scale: 0.99 } : {}}
+        className="w-full rounded-lg bg-zinc-100 py-3.5 text-sm font-semibold text-zinc-900 transition-colors hover:bg-white disabled:opacity-25 disabled:cursor-not-allowed"
       >
-        Start Debate
+        Start the debate
       </motion.button>
     </motion.form>
   );

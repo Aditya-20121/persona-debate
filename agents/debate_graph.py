@@ -93,9 +93,21 @@ class DebateState(TypedDict):
 def get_llm() -> SegmindChatLLM:
     return SegmindChatLLM(
         model=os.getenv("SEGMIND_MODEL", "llama-v3p1-8b-instruct"),
-        max_tokens=900,
+        # Headroom above the ~160-word limit enforced in the per-turn
+        # prompts, so a slightly-over response isn't cut off mid-sentence.
+        max_tokens=450,
         temperature=0.7,
     )
+
+
+# Appended to every turn's user prompt. The persona system prompts already
+# ask for 4-6 sentences, but an 8B model drifts into essay mode once the
+# transcript grows — restating the limit at the end of the user message
+# (recency) keeps responses readable.
+_BREVITY_RULE = (
+    "\n\nHARD LIMIT: respond in at most 3 short paragraphs and 160 words total. "
+    "No preamble, no summary of the debate so far — go straight to your argument."
+)
 
 
 # ── Agent node factory ───────────────────────────────────────────────────────
@@ -149,6 +161,7 @@ def make_agent_node(persona: PersonaConfig):
                 f"Debate question: \"{state['question']}\"\n\n"
                 "Give your opening argument. State your position clearly and directly. "
                 "Ground it in your actual historical experience and beliefs."
+                + _BREVITY_RULE
             )
         else:
             transcript = "\n\n".join(
@@ -165,6 +178,7 @@ def make_agent_node(persona: PersonaConfig):
                     "This is your closing statement. Summarize why your position has won "
                     "this debate. Be decisive, reference what was said, and end with a "
                     "powerful final line that defines your worldview."
+                    + _BREVITY_RULE
                 )
             else:
                 user_content = (
@@ -174,6 +188,7 @@ def make_agent_node(persona: PersonaConfig):
                     f"Directly address {last_speaker}'s argument first — identify its "
                     f"weakest point and challenge it by name. Then advance your own position "
                     f"with a concrete example from your life or your ideology."
+                    + _BREVITY_RULE
                 )
 
         messages = [

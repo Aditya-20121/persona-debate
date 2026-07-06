@@ -7,8 +7,13 @@ html {
 }
 
 body {
-  background: #0a0c12;
+  background: #0c0d10;
   min-height: 100vh;
+}
+
+::selection {
+  background: #818cf8;
+  color: #0c0d10;
 }
 
 ::-webkit-scrollbar {
@@ -19,9 +24,9 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a3040;
+  background: #26282f;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a4156;
+  background: #34373f;
 }

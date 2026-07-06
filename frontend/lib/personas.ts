@@ -23,27 +23,28 @@ export const PERSONAS: Persona[] = [
   },
 ];
 
+// Class-name strings must appear verbatim for Tailwind's scanner.
 export const PERSONA_THEME: Record<
   PersonaId,
-  { text: string; bg: string; border: string; ring: string }
+  { text: string; bg: string; border: string; edge: string }
 > = {
   gandhi: {
     text: "text-gandhi",
     bg: "bg-gandhi-soft",
     border: "border-gandhi/40",
-    ring: "ring-gandhi/50",
+    edge: "border-l-gandhi",
   },
   mandela: {
     text: "text-mandela",
     bg: "bg-mandela-soft",
     border: "border-mandela/40",
-    ring: "ring-mandela/50",
+    edge: "border-l-mandela",
   },
   marx: {
     text: "text-marx",
     bg: "bg-marx-soft",
     border: "border-marx/40",
-    ring: "ring-marx/50",
+    edge: "border-l-marx",
   },
 };
 

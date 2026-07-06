@@ -36,8 +36,8 @@ export default function QuestionPicker({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`w-full flex items-center justify-between gap-3 rounded-lg bg-arena-raised border px-3.5 py-2.5 text-sm text-left text-slate-100 transition-colors ${
-          open ? "border-accent" : "border-arena-border hover:border-slate-600"
+        className={`w-full flex items-center justify-between gap-3 rounded-lg bg-arena-raised border px-3.5 py-2.5 text-sm text-left text-zinc-100 transition-colors ${
+          open ? "border-accent" : "border-arena-border hover:border-zinc-600"
         }`}
       >
         <span className="truncate">{value}</span>
@@ -48,7 +48,7 @@ export default function QuestionPicker({
           height="14"
           viewBox="0 0 20 20"
           fill="none"
-          className="shrink-0 text-slate-400"
+          className="shrink-0 text-zinc-400"
         >
           <path
             d="M5 7.5L10 12.5L15 7.5"
@@ -71,7 +71,7 @@ export default function QuestionPicker({
           >
             {QUESTION_GROUPS.map((group) => (
               <div key={group.tier} className="mb-1 last:mb-0">
-                <div className="px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                <div className="px-3.5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
                   {group.tier}
                 </div>
                 {group.questions.map((q) => {
@@ -87,7 +87,7 @@ export default function QuestionPicker({
                       className={`w-full text-left px-3.5 py-2 text-sm transition-colors ${
                         active
                           ? "bg-accent-soft text-accent"
-                          : "text-slate-300 hover:bg-white/5"
+                          : "text-zinc-300 hover:bg-white/5"
                       }`}
                     >
                       {q}

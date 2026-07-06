@@ -1,5 +1,17 @@
 import type { Metadata } from "next";
+import { Inter, Newsreader } from "next/font/google";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+});
+
+const newsreader = Newsreader({
+  subsets: ["latin"],
+  style: ["normal", "italic"],
+  variable: "--font-newsreader",
+});
 
 export const metadata: Metadata = {
   title: "Debate Arena",
@@ -13,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className="dark">
-      <body className="text-slate-100 antialiased">{children}</body>
+    <html lang="en" className={`dark ${inter.variable} ${newsreader.variable}`}>
+      <body className="font-sans text-zinc-100 antialiased">{children}</body>
     </html>
   );
 }
