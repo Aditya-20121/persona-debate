@@ -3,7 +3,8 @@
 FastAPI backend that powers the multi-agent debate system. Uses **LangGraph** to orchestrate
 sequential AI personas, **Llama 3.1 8B** (via Segmind API) for debate responses,
 **BGE-large-en-v1.5** (local) for dense embeddings, and **Supabase pgvector + BM25** for hybrid
-retrieval.
+retrieval. A **Next.js frontend** (`frontend/`) renders the live debate stream with expandable
+RAG grounding per turn.
 
 ---
 
@@ -13,14 +14,15 @@ retrieval.
 |---|---|
 | API framework | FastAPI + Uvicorn |
 | Agent orchestration | LangGraph |
-| Debate LLM | Llama 3.1 8B — Segmind API (`langchain-openai`, OpenAI-compatible) |
-| Tagging LLM (data pipeline only) | Qwen2.5 1.5B — local via Ollama |
+| Debate LLM | Llama 3.1 8B — Segmind API (official `segmind` SDK) |
+| Tagging LLM (data pipeline) | Llama 3.1 8B — Segmind API (same SDK, parallelized) |
 | Dense embeddings | `BAAI/bge-large-en-v1.5` — local via `sentence-transformers` |
 | Sparse index | BM25Okapi (`rank-bm25`, persisted to `data/bm25_index.pkl`) |
 | Vector store | Supabase pgvector (`persona_chunks` table) |
 | Retrieval strategy | Dense + sparse fused with Reciprocal Rank Fusion (RRF) |
 | Streaming | `sse-starlette` (Server-Sent Events) |
 | Validation | Pydantic v2 |
+| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind CSS |
 
 ---
 
@@ -38,15 +40,20 @@ debate-ai-backend/
 │   └── debate_graph.py          # LangGraph state machine (Llama 3.1 8B via Segmind)
 │
 ├── models/
-│   └── schemas.py               # Pydantic request/response models
+│   └── schemas.py               # Pydantic request/response models (incl. RetrievedChunk)
 │
-└── data/                        # RAG pipeline (see data/README.md for full details)
-    ├── README.md                # Complete pipeline walkthrough
-    ├── 01_parse_and_tag.py      # PDF → chunks → Qwen2.5 tagging → JSONL
-    ├── 02_embed_and_store.py    # JSONL → BGE embeddings → Supabase + BM25 index
-    ├── retrieval_v2.py          # Runtime hybrid retrieval (imported by debate_graph.py)
-    ├── supabase_v2_setup.sql    # Run once in Supabase SQL editor
-    └── requirements_rag.txt     # Additional deps for the data pipeline
+├── data/                        # RAG pipeline (see data/README.md for full details)
+│   ├── README.md                # Complete pipeline walkthrough
+│   ├── 01_parse_and_tag.py      # PDF/DOCX → chunks → Llama 3.1 8B tagging → JSONL
+│   ├── 02_embed_and_store.py    # JSONL → BGE embeddings → Supabase + BM25 index
+│   ├── retrieval_v2.py          # Runtime hybrid retrieval (imported by debate_graph.py)
+│   ├── supabase_v2_setup.sql    # Run once in Supabase SQL editor
+│   └── requirements_rag.txt     # Additional deps for the data pipeline
+│
+└── frontend/                    # Next.js UI — debate transcript + RAG grounding viewer
+    ├── app/page.tsx              # Setup form + streaming transcript (single page)
+    ├── components/               # DebateSetupForm, MessageBubble, RetrievedChunks, ...
+    └── lib/                      # api.ts (SSE client), personas.ts, questions.ts
 ```
 
 ---
@@ -54,10 +61,9 @@ debate-ai-backend/
 ## Prerequisites
 
 - Python 3.10+
+- Node.js 18+ (for the frontend)
 - A [Segmind](https://segmind.com) account with API access to `llama-v3p1-8b-instruct`
 - A [Supabase](https://supabase.com) project (free tier works)
-- GPU with ~1.3 GB VRAM for BGE-large embeddings at retrieval time
-- [Ollama](https://ollama.com) — only needed for the one-time data pipeline (PDF tagging)
 
 ---
 
@@ -137,7 +143,7 @@ CREATE INDEX idx_persona_chunks_embedding
 
 See **[data/README.md](data/README.md)** for the full pipeline walkthrough.
 
-### Step 5 — Start the server
+### Step 5 — Start the backend
 
 ```bash
 python main.py
@@ -145,6 +151,25 @@ python main.py
 
 - API: `http://localhost:8000`
 - Interactive docs: `http://localhost:8000/docs`
+
+### Step 6 — Start the frontend
+
+```bash
+cd frontend
+npm install
+cp .env.local.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:8000
+npm run dev
+```
+
+Open `http://localhost:3000`. The backend's CORS is pre-configured for this origin.
+
+**Using the UI:**
+
+1. Select 2 or 3 debaters
+2. Pick a topic from the curated list (`debate_questions.md`) or write your own (5–500 chars)
+3. Choose the number of rounds and whether to show RAG grounding
+4. Click **Start Debate** — turns stream in live; each bubble has a **Show grounding** toggle
+   revealing the retrieved passages (theme, dilemma type, stance, excerpt) that grounded it
 
 ---
 
