@@ -33,8 +33,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import fitz  # PyMuPDF
+import segmind
 from dotenv import load_dotenv
-from openai import OpenAI
 
 load_dotenv()
 
@@ -69,23 +69,17 @@ DOCX_PARA_RANGES: dict[str, tuple[int, int] | None] = {
 }
 
 # ── Segmind / LLM config ──────────────────────────────────────────────────────
+# Segmind's REST contract is POST /v1/<model-name> (model in the path), not
+# OpenAI's shared /v1/chat/completions — so we use their official SDK
+# (`segmind.chat_sync`) rather than the openai client against a fake base_url.
 _SEGMIND_MODEL = os.getenv("SEGMIND_MODEL", "llama-v3p1-8b-instruct")
 PARALLEL_WORKERS = 6  # concurrent tagging requests to the Segmind API
-_client: OpenAI | None = None
 
 
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        api_key = os.getenv("SEGMIND_API_KEY")
-        if not api_key:
-            print("[ERROR] SEGMIND_API_KEY is not set. Add it to your .env file.")
-            sys.exit(1)
-        _client = OpenAI(
-            api_key=api_key,
-            base_url=os.getenv("SEGMIND_BASE_URL", "https://api.segmind.com/v1"),
-        )
-    return _client
+def _check_api_key() -> None:
+    if not os.getenv("SEGMIND_API_KEY"):
+        print("[ERROR] SEGMIND_API_KEY is not set. Add it to your .env file.")
+        sys.exit(1)
 
 
 # ── Chunking config ───────────────────────────────────────────────────────────
@@ -297,8 +291,8 @@ def _segmind_tag(text: str, retries: int = 2) -> dict:
 
     for attempt in range(retries + 1):
         try:
-            response = _get_client().chat.completions.create(
-                model=_SEGMIND_MODEL,
+            reply = segmind.chat_sync(
+                _SEGMIND_MODEL,
                 messages=[
                     {
                         "role": "system",
@@ -309,7 +303,7 @@ def _segmind_tag(text: str, retries: int = 2) -> dict:
                 temperature=0.05,
                 max_tokens=256,
             )
-            raw = response.choices[0].message.content or ""
+            raw = reply.text or ""
 
             raw = re.sub(r"^```(?:json)?\s*", "", raw.strip())
             raw = re.sub(r"\s*```$", "", raw)
@@ -439,7 +433,7 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # Fail fast if the API key is missing before processing any documents
-    _get_client()
+    _check_api_key()
 
     args = sys.argv[1:]
     limit: int | None = None

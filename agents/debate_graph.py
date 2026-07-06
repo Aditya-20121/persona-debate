@@ -1,13 +1,47 @@
 import os
+from dataclasses import dataclass
 from typing import TypedDict, Annotated
 import operator
 
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, SystemMessage
+import segmind
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 
 from agents.personas import PERSONAS, PersonaConfig
 from data.retrieval_v2 import retrieve_context_for_persona
+
+# Segmind's REST contract is POST /v1/<model-name> (model in the path), not
+# OpenAI's shared /v1/chat/completions — so debate turns use Segmind's
+# official SDK directly instead of langchain_openai.ChatOpenAI.
+_ROLE_MAP = {SystemMessage: "system", HumanMessage: "user"}
+
+
+@dataclass
+class _LLMResponse:
+    content: str
+
+
+class SegmindChatLLM:
+    """Minimal invoke(messages) -> response.content wrapper, just enough
+    surface area for the agent node below."""
+
+    def __init__(self, model: str, max_tokens: int, temperature: float):
+        self.model = model
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+
+    def invoke(self, messages: list[BaseMessage]) -> _LLMResponse:
+        payload = [
+            {"role": _ROLE_MAP.get(type(m), "user"), "content": m.content}
+            for m in messages
+        ]
+        reply = segmind.chat_sync(
+            self.model,
+            messages=payload,
+            temperature=self.temperature,
+            max_tokens=self.max_tokens,
+        )
+        return _LLMResponse(content=reply.text or "")
 
 
 # ── Shared state ────────────────────────────────────────────────────────────
@@ -30,11 +64,9 @@ class DebateState(TypedDict):
 
 # ── Build LLM ────────────────────────────────────────────────────────────────
 
-def get_llm() -> ChatOpenAI:
-    return ChatOpenAI(
+def get_llm() -> SegmindChatLLM:
+    return SegmindChatLLM(
         model=os.getenv("SEGMIND_MODEL", "llama-v3p1-8b-instruct"),
-        api_key=os.getenv("SEGMIND_API_KEY"),
-        base_url=os.getenv("SEGMIND_BASE_URL", "https://api.segmind.com/v1"),
         max_tokens=900,
         temperature=0.7,
     )
