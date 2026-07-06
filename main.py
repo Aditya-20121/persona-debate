@@ -25,14 +25,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Debate Arena API",
-    description="Multi-agent historical persona debate powered by LangGraph + Gemma 3 (local)",
+    description="Multi-agent historical persona debate powered by LangGraph + Llama 3.1 8B (Segmind API)",
     version="1.0.0",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Next.js dev server
+    # Next.js dev server — allow_origin_regex covers auto-bumped ports
+    # (3001, 3002, ...) when 3000 is already taken by another process.
+    allow_origin_regex=r"http://localhost:30\d\d",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
