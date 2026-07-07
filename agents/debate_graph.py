@@ -233,7 +233,9 @@ def increment_round(state: DebateState) -> dict:
 
 def should_continue(state: DebateState) -> str:
     """After the last persona in a round, decide to loop or end."""
-    if state["current_round"] >= state["max_rounds"]:
+    # Rounds are 0-indexed: with max_rounds=N the last round is N-1.
+    # current_round here is the round that just finished.
+    if state["current_round"] >= state["max_rounds"] - 1:
         return END
     return "increment_round"
 
