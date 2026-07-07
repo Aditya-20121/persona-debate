@@ -1,19 +1,20 @@
 # Data Pipeline — Persona Knowledge Base
 
 This folder contains the full preprocessing, embedding, and retrieval pipeline that converts
-biography PDFs into a hybrid RAG knowledge base for each debate persona.
+biography sources (PDF or DOCX) into a hybrid RAG knowledge base for each debate persona.
 
 ---
 
 ## Overview
 
-The pipeline is split into two offline phases and one runtime module:
+The pipeline is split into two offline phases, one runtime module, and a smoke test:
 
 | Component | Role |
 |---|---|
-| `01_parse_and_tag.py` | Extract PDF text → clean chunks → LLM philosophical tagging → JSONL |
+| `01_parse_and_tag.py` | Extract PDF/DOCX text → clean chunks → LLM philosophical tagging → JSONL |
 | `02_embed_and_store.py` | Load JSONL → BGE-large embeddings → Supabase upsert + BM25 index |
 | `retrieval_v2.py` | Runtime: hybrid dense + sparse retrieval with RRF fusion |
+| `03_test_retrieval.py` | Smoke test: run the full retrieval path for all personas |
 | `supabase_v2_setup.sql` | One-time Supabase schema setup |
 | `requirements_rag.txt` | Python dependencies for this pipeline |
 
@@ -30,6 +31,7 @@ data/
 ├── 01_parse_and_tag.py
 ├── 02_embed_and_store.py
 ├── retrieval_v2.py
+├── 03_test_retrieval.py
 ├── supabase_v2_setup.sql
 ├── requirements_rag.txt
 │
@@ -52,10 +54,11 @@ pip install -r data/requirements_rag.txt
 | Package | Version | Purpose |
 |---|---|---|
 | `pymupdf` | ≥1.24.0 | PDF text extraction |
+| `python-docx` | ≥1.1.0 | DOCX text extraction |
+| `segmind` | ≥1.1.0 | Official SDK for Llama 3.1 8B tagging calls |
 | `sentence-transformers` | ≥3.0.0 | BGE-large-en-v1.5 encoding |
-| `torch` | ≥2.2.0 | GPU backend |
+| `torch` | ≥2.2.0 | Backend for sentence-transformers (CPU works too) |
 | `rank-bm25` | ≥0.2.2 | Sparse BM25 index |
-| `requests` | ≥2.31.0 | Ollama HTTP client |
 | `supabase` | ≥2.10.0 | Vector store client |
 
 **GPU install for PyTorch (CUDA 12.1):**
@@ -87,11 +90,12 @@ This creates:
 
 ### What it does
 
-1. **Extract** — PyMuPDF reads each PDF page by page
+1. **Extract** — PyMuPDF for `.pdf` (respecting the manual `PAGE_RANGES` per book),
+   python-docx for `.docx` (trimmed by `DOCX_PARA_RANGES` since .docx has no pages)
 2. **Clean** — rejoins hyphenated line-breaks, removes isolated page numbers, collapses whitespace
 3. **Filter** — skips boilerplate pages: TOC (dot-leader detection), copyright, bibliography, index, short pages (<30 words)
 4. **Chunk** — sliding-window splitter, ~1,500 characters per chunk, 300-character overlap, snaps to sentence boundaries
-5. **Tag** — each chunk is sent to Llama 3.1 8B via Segmind API which returns structured JSON:
+5. **Tag** — each chunk is sent to Llama 3.1 8B via Segmind API (6 parallel workers) which returns structured JSON:
    - `topic_keywords` — 3–5 core themes
    - `ethical_dilemma_type` — one of 11 fixed categories (see taxonomy below)
    - `philosophical_summary` — one sentence capturing the moral stance
@@ -107,6 +111,9 @@ python data/01_parse_and_tag.py
 python data/01_parse_and_tag.py gandhi
 python data/01_parse_and_tag.py mandela
 python data/01_parse_and_tag.py marx
+
+# Smoke test — tag only the first N chunks, then inspect the JSONL
+python data/01_parse_and_tag.py gandhi --limit 10
 ```
 
 ### Sample output
@@ -126,7 +133,7 @@ python data/01_parse_and_tag.py marx
   ...
 ```
 
-**Estimated time:** ~2–4 seconds per chunk on 8 GB GPU → ~2–3 hours for all three personas.
+**Estimated time:** ~30 minutes for all three personas (~2,500 chunks, 6 parallel API workers).
 
 **Resume support:** The script tracks processed `chunk_index` values in the JSONL file.
 If interrupted, re-running automatically skips completed chunks and continues from where it stopped.
@@ -155,10 +162,14 @@ If interrupted, re-running automatically skips completed chunks and continues fr
 ### What it does
 
 1. **Load** — reads all `data/processed/*_tagged.jsonl` files into memory
-2. **Model** — downloads (first run only, ~1.3 GB) and loads `BAAI/bge-large-en-v1.5` via `sentence-transformers`
-3. **Embed** — encodes all passage texts in GPU batches of 32 → 1024-dimensional normalised float32 vectors
-4. **Store (dense)** — clears existing rows per persona in Supabase, then batch-inserts all chunks with their embeddings
-5. **Store (sparse)** — builds a `BM25Okapi` index over all chunks, pre-computes a `persona_id → positions` lookup map, serialises to `data/bm25_index.pkl`
+2. **Filter** — drops dead-weight chunks (dilemma type `None` or empty summary) that carry
+   no philosophical stance and would never help a debate
+3. **Model** — downloads (first run only, ~1.3 GB) and loads `BAAI/bge-large-en-v1.5` via `sentence-transformers`
+4. **Embed** — encodes each chunk's **retrieval key** (`philosophical_summary` + topic
+   keywords + content) in batches of 32 → 1024-dim normalised float32 vectors. Leading with
+   the summary bridges the gap between abstract debate questions and narrative biography text
+5. **Store (dense)** — clears existing rows per persona in Supabase, then batch-inserts all chunks with their embeddings
+6. **Store (sparse)** — builds a `BM25Okapi` index over the same retrieval keys, pre-computes a `persona_id → positions` lookup map, serialises to `data/bm25_index.pkl`
 
 ### Run
 
@@ -189,13 +200,15 @@ python data/02_embed_and_store.py
   BM25 index saved → data/bm25_index.pkl  (12.3 MB)
 ```
 
-**Estimated time:** ~10–20 minutes (embedding dominates).
+**Estimated time:** ~15 minutes on GPU, ~90 minutes on CPU (embedding dominates).
 
 ### Step 2b — Create the IVFFlat index (after data is loaded)
 
 Run this in your **Supabase SQL Editor** immediately after Phase 2 completes:
 
 ```sql
+SET maintenance_work_mem = '64MB';  -- free tier's 32MB default is too small
+
 CREATE INDEX idx_persona_chunks_embedding
     ON persona_chunks
     USING ivfflat (embedding vector_cosine_ops)
@@ -203,6 +216,16 @@ CREATE INDEX idx_persona_chunks_embedding
 ```
 
 > If you already ran Phase 2 before creating the index, run `REINDEX TABLE persona_chunks;` instead.
+
+### Step 2c — Verify retrieval end-to-end
+
+```bash
+python data/03_test_retrieval.py
+python data/03_test_retrieval.py "Should the oppressed forgive their oppressors?"
+```
+
+Runs the full hybrid path (BGE query embed → Supabase dense + BM25 sparse → RRF) for every
+persona and prints the retrieved passages, failing loudly if any persona returns nothing.
 
 ---
 
@@ -260,8 +283,10 @@ debate question
 
 | Decision | Reason |
 |---|---|
+| Enriched retrieval key | Chunks are indexed as `philosophical_summary + keywords + content`, not raw text — debate questions are abstract while biography text is narrative, and the summary lives in the same semantic space as the questions |
+| Turn-aware queries | Rebuttal/closing turns query with the question **plus the opponent's last argument**, so counter-evidence surfaces (see `agents/debate_graph.py`) |
 | BGE asymmetric encoding | Queries use `"Represent this sentence for searching relevant passages: "` prefix; passages are encoded without prefix — matches BGE-large-en-v1.5 training setup |
-| Over-fetch before fusion | Both retrievers fetch `k × 3 = 15` candidates so RRF has enough diversity to rerank meaningfully |
+| Over-fetch before fusion | Both retrievers fetch `k × 3` candidates so RRF has enough diversity to rerank meaningfully |
 | Metadata headers in context | LLM sees the philosophical framing (theme, dilemma type, stance) before the raw text — primes the model with the persona's logic, not just facts |
 | Non-fatal fallback | Any retrieval failure returns `""` — the debate continues without context rather than crashing |
 | `lru_cache(maxsize=1)` on all singletons | BGE model, BM25 index, and Supabase client are loaded once per server process and reused across all requests |

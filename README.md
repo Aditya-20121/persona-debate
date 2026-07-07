@@ -1,10 +1,17 @@
-# Debate Arena — Backend
+# Debate Arena
 
-FastAPI backend that powers the multi-agent debate system. Uses **LangGraph** to orchestrate
-sequential AI personas, **Llama 3.1 8B** (via Segmind API) for debate responses,
-**BGE-large-en-v1.5** (local) for dense embeddings, and **Supabase pgvector + BM25** for hybrid
-retrieval. A **Next.js frontend** (`frontend/`) renders the live debate stream with expandable
-RAG grounding per turn.
+Gandhi, Mandela, and Marx — resurrected as AI debaters, arguing in their own voice, grounded
+in their real writings through hybrid retrieval-augmented generation.
+
+A **FastAPI + LangGraph** backend orchestrates sequential persona agents powered by
+**Llama 3.1 8B** (Segmind API), each turn grounded by hybrid retrieval
+(**BGE-large-en-v1.5** dense + **BM25** sparse, fused with RRF) over **Supabase pgvector**.
+A cinematic **Next.js frontend** streams the debate live with expandable RAG grounding per turn.
+
+## Demo
+
+▶ **[Watch the demo video](demo_debate.MP4)** — a full debate from motion selection to closing
+statements, including the retrieved-passages panel.
 
 ---
 
@@ -22,7 +29,7 @@ RAG grounding per turn.
 | Retrieval strategy | Dense + sparse fused with Reciprocal Rank Fusion (RRF) |
 | Streaming | `sse-starlette` (Server-Sent Events) |
 | Validation | Pydantic v2 |
-| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind CSS |
+| Frontend | Next.js 14 (App Router) + TypeScript + Tailwind CSS + Framer Motion |
 
 ---
 
@@ -34,10 +41,12 @@ debate-ai-backend/
 ├── main.py                      # FastAPI app — CORS, SSE /debate/start endpoint
 ├── requirements.txt             # Runtime dependencies
 ├── .env.example                 # Environment variable template
+├── debate_questions.md          # 25 curated motions, tiered by clash quality
+├── demo_debate.MP4              # Demo recording
 │
 ├── agents/
 │   ├── personas.py              # Persona configs + system prompts + few-shot examples
-│   └── debate_graph.py          # LangGraph state machine (Llama 3.1 8B via Segmind)
+│   └── debate_graph.py          # LangGraph state machine (Llama 3.1 8B via Segmind SDK)
 │
 ├── models/
 │   └── schemas.py               # Pydantic request/response models (incl. RetrievedChunk)
@@ -47,12 +56,13 @@ debate-ai-backend/
 │   ├── 01_parse_and_tag.py      # PDF/DOCX → chunks → Llama 3.1 8B tagging → JSONL
 │   ├── 02_embed_and_store.py    # JSONL → BGE embeddings → Supabase + BM25 index
 │   ├── retrieval_v2.py          # Runtime hybrid retrieval (imported by debate_graph.py)
+│   ├── 03_test_retrieval.py     # Retrieval smoke test (run after Phase 2)
 │   ├── supabase_v2_setup.sql    # Run once in Supabase SQL editor
 │   └── requirements_rag.txt     # Additional deps for the data pipeline
 │
-└── frontend/                    # Next.js UI — debate transcript + RAG grounding viewer
-    ├── app/page.tsx              # Setup form + streaming transcript (single page)
-    ├── components/               # DebateSetupForm, MessageBubble, RetrievedChunks, ...
+└── frontend/                    # Next.js UI — cinematic hero + live debate stream
+    ├── app/page.tsx              # Stage machine: hero → setup → debate
+    ├── components/               # Hero, DebateSetupForm, MessageBubble, QuestionPicker, ...
     └── lib/                      # api.ts (SSE client), personas.ts, questions.ts
 ```
 
@@ -90,7 +100,6 @@ Edit `.env`:
 ```env
 # Segmind — Llama 3.1 8B serverless API
 SEGMIND_API_KEY=your_segmind_api_key_here
-SEGMIND_BASE_URL=https://api.segmind.com/v1
 SEGMIND_MODEL=llama-v3p1-8b-instruct
 
 # Supabase — pgvector knowledge store
@@ -122,14 +131,22 @@ data/mandela.pdf
 data/karl-marx.docx
 ```
 
-Run the two-phase pipeline (requires `SEGMIND_API_KEY` in `.env`):
+Run the two-phase pipeline (requires `SEGMIND_API_KEY` in `.env`). Smoke-test first:
 
 ```bash
-# Phase 1 — PDF → clean chunks → Llama 3.1 8B tagging via Segmind → JSONL (~2–3 hrs, resumable)
+# Optional smoke test — tag only 10 chunks per persona (~1 min)
+python data/01_parse_and_tag.py gandhi --limit 10
+
+# Phase 1 — source docs → clean chunks → Llama 3.1 8B tagging (6 parallel workers,
+#           ~30 min for ~2,500 chunks, resumable if interrupted)
 python data/01_parse_and_tag.py
 
-# Phase 2 — JSONL → BGE embeddings → Supabase + BM25 index (~15 min)
+# Phase 2 — JSONL → BGE embeddings → Supabase + BM25 index
+#           (~15 min on GPU, ~90 min on CPU)
 python data/02_embed_and_store.py
+
+# Verify the full retrieval path end-to-end
+python data/03_test_retrieval.py
 ```
 
 After Phase 2, run this in Supabase SQL editor to build the vector similarity index:
@@ -161,15 +178,18 @@ cp .env.local.example .env.local   # NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run dev
 ```
 
-Open `http://localhost:3000`. The backend's CORS is pre-configured for this origin.
+Open `http://localhost:3000` (any `localhost:30xx` port works — CORS covers auto-bumped ports).
 
 **Using the UI:**
 
-1. Select 2 or 3 debaters
-2. Pick a topic from the curated list (`debate_questions.md`) or write your own (5–500 chars)
-3. Choose the number of rounds and whether to show RAG grounding
-4. Click **Start Debate** — turns stream in live; each bubble has a **Show grounding** toggle
-   revealing the retrieved passages (theme, dilemma type, stance, excerpt) that grounded it
+1. Land on the cinematic hero and hit **Begin Debate**
+2. Set the speaking order by **dragging debaters** into position (the 1st speaker opens each
+   round; the last speaker gets the final word), and toggle any debater In/Out
+3. Pick a motion from the curated list (`debate_questions.md`) or write your own (5–500 chars)
+4. Choose rounds (1–5) and whether to show RAG grounding
+5. Turns reveal one at a time with a "preparing an argument" indicator between speakers; each
+   card has a **Show grounding** toggle revealing the retrieved passages (theme, dilemma type,
+   stance, excerpt) that grounded that argument
 
 ---
 
@@ -188,12 +208,15 @@ Each persona (`agents/personas.py`) is configured with:
 ### LangGraph State Machine
 
 ```
-[START] → mandela_node → gandhi_node → marx_node
-               ↑                            ↓
-               └──── increment_round ←──── (if rounds remain)
-                                            ↓
-                                          [END]
+[START] → speaker₁ → speaker₂ → speaker₃
+              ↑                     ↓
+              └── increment_round ←─┘  (if rounds remain)
+                                    ↓
+                                  [END]
 ```
+
+Nodes are chained in the exact order `persona_ids` arrives — the frontend's drag-to-reorder
+list directly controls who opens and who closes each round.
 
 **Shared state** (`DebateState`):
 - `question` — the debate topic
@@ -201,22 +224,26 @@ Each persona (`agents/personas.py`) is configured with:
 - `current_round`, `max_rounds`, `phase` (`opening` → `rebuttal` → `closing`)
 
 **Each agent node per turn:**
-1. Calls `retrieve_context_for_persona()` — hybrid RAG (dense + BM25 + RRF)
-2. Injects top-5 retrieved passages with philosophical metadata headers into system prompt
-3. Builds phase-appropriate user prompt (opening / rebuttal / closing)
-4. Calls **Llama 3.1 8B** via Segmind API — `max_tokens=900`, `temperature=0.7`
-5. Appends response to shared history
+
+1. Builds a turn-aware retrieval query — rebuttal/closing turns retrieve against the
+   opponent's last argument as well as the question, so counter-evidence surfaces
+2. Runs hybrid RAG (dense + BM25 + RRF) and injects the top-3 passages with philosophical
+   metadata headers into the system prompt
+3. Builds a phase-appropriate user prompt ending with a hard brevity rule
+   (≤3 short paragraphs / 160 words)
+4. Calls **Llama 3.1 8B** via the Segmind SDK — `max_tokens=450`, `temperature=0.7`
+5. Appends the response (plus its retrieved chunks) to shared history
 
 ### Hybrid RAG Retrieval
 
 ```
-Debate question
+Turn-aware query (question + opponent's last claim)
       │
       ├── BGE-large-en-v1.5 (local) ──► Supabase cosine search ──────────┐
       │   encode with query prefix       filtered by persona_id           │
-      │                                  top 15 dense results             ├── RRF (k=60) ──► top 5
+      │                                  top 3×k dense results            ├── RRF (k=60) ──► top k
       └── BM25Okapi (in-memory) ───────► persona-filtered keyword search ─┘
-          from bm25_index.pkl            top 15 sparse results
+          from bm25_index.pkl            top 3×k sparse results
                                                   │
                                                   ▼
                               [Theme: Non-violence, Civil Disobedience]
@@ -228,20 +255,28 @@ Debate question
                               Injected into Llama 3.1 8B system prompt
 ```
 
-The philosophical metadata headers prime the LLM with the persona's *mindset* before the raw
-evidence — separating persona simulation from plain fact retrieval.
+Two details make this retrieval persona-aware rather than plain fact lookup:
+
+- **Enriched retrieval key** — what gets embedded (and BM25-tokenised) is
+  `philosophical_summary + topic keywords + content`, not raw text alone. Debate questions
+  are abstract while biography text is narrative; the summary bridges that gap.
+- **Metadata headers** — the LLM sees the persona's *mindset* (theme, dilemma type, stance)
+  before the raw evidence.
 
 ### SSE Streaming
 
 `POST /debate/start` streams each agent turn as a Server-Sent Event:
 
 ```
-data: {"type":"message","persona_id":"mandela","name":"Nelson Mandela","text":"...","round":0}
-data: {"type":"message","persona_id":"gandhi","name":"Mahatma Gandhi","text":"...","round":0}
-data: {"type":"message","persona_id":"marx","name":"Karl Marx","text":"...","round":0}
+data: {"type":"message","persona_id":"mandela","name":"Nelson Mandela","text":"...","round":0,"retrieved_chunks":[...]}
+data: {"type":"message","persona_id":"gandhi","name":"Mahatma Gandhi","text":"...","round":0,"retrieved_chunks":[...]}
+data: {"type":"message","persona_id":"marx","name":"Karl Marx","text":"...","round":0,"retrieved_chunks":[...]}
 ...
 data: {"type":"done"}
 ```
+
+Each message carries the `retrieved_chunks` that grounded it (content, keywords, dilemma
+type, stance, page number) so clients can render a "show grounding" panel per turn.
 
 ---
 
@@ -275,8 +310,7 @@ data: {"type":"done"}
 
 | Variable | Required | Default | Description |
 |---|---|---|---|
-| `SEGMIND_API_KEY` | Yes | — | Segmind API key |
-| `SEGMIND_BASE_URL` | No | `https://api.segmind.com/v1` | Segmind API base URL |
+| `SEGMIND_API_KEY` | Yes | — | Segmind API key (read by the official SDK) |
 | `SEGMIND_MODEL` | No | `llama-v3p1-8b-instruct` | Model identifier |
 | `SUPABASE_URL` | Yes | — | Supabase project URL |
 | `SUPABASE_SERVICE_KEY` | Yes | — | Service role key (bypasses RLS) |
