@@ -10,8 +10,18 @@ A cinematic **Next.js frontend** streams the debate live with expandable RAG gro
 
 ## Demo
 
-▶ **[Watch the demo video](demo_debate.MP4)** — a full debate from motion selection to closing
-statements, including the retrieved-passages panel.
+▶ **[Watch the demo video](demo/demo_debate.MP4)** — a full debate from motion selection to
+closing statements, including the retrieved-passages panel.
+
+![Landing page — cinematic video hero](demo/debate-00.png)
+
+![Setup — drag debaters into speaking order, pick a motion, set rounds](demo/debate-01.png)
+
+![Debate — Mandela's opening argument on the motion](demo/debate-02.png)
+
+![Turns reveal one by one with a typing indicator between speakers](demo/debate-03.png)
+
+![RAG grounding — the retrieved passages (theme, dilemma type, stance, page) behind each argument](demo/debate-04.png)
 
 ---
 
@@ -42,7 +52,7 @@ debate-ai-backend/
 ├── requirements.txt             # Runtime dependencies
 ├── .env.example                 # Environment variable template
 ├── debate_questions.md          # 25 curated motions, tiered by clash quality
-├── demo_debate.MP4              # Demo recording
+├── demo/                        # Demo video + screenshots
 │
 ├── agents/
 │   ├── personas.py              # Persona configs + system prompts + few-shot examples
